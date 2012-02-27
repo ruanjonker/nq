@@ -1,0 +1,26 @@
+{application, nq,
+
+    [
+
+    {description, "nq"},
+
+    {vsn, "0.0.1"},
+
+    {id, "nq"},
+
+    {modules,   [
+
+                %APP_MODULES%
+
+                ]
+    },
+
+    {registered, []},
+
+    {mod, {nq_app, []}},
+
+    {applications, [kernel, stdlib]}
+
+    ]
+
+}.
