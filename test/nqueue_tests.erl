@@ -4,6 +4,8 @@
 
 setup() -> 
 
+    error_logger:tty(false),
+
     ok = application:load(nq),
 
     ok = application:set_env(nq, base_dir, "./nq_unit_test_data/"),
@@ -52,9 +54,9 @@ buffer_test() ->
 
     ?assertEqual(ok, application:set_env(nq, max_frag_size, 128)),
 
-    F = fun (Filename, _) -> ok = file:delete(Filename) end,
+    os:cmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertEqual(ok, filelib:fold_files("./nq_unit_test_data/", "", true, F, ok)),
+    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
 
     {ok, _} = nqueue:start_link("test"),
 
@@ -93,9 +95,9 @@ buffer2_test() ->
 
     ?assertEqual(ok, application:set_env(nq, max_frag_size, 128)),
 
-    F = fun (Filename, _) -> ok = file:delete(Filename) end,
+    os:cmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertEqual(ok, filelib:fold_files("./nq_unit_test_data/", "", true, F, ok)),
+    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
 
     {ok, _} = nqueue:start_link("test"),
 
@@ -110,7 +112,9 @@ buffer2_test() ->
     ?assertEqual(ok, nqueue:stop("test")),
 
 
-    ?assertEqual(ok, filelib:fold_files("./nq_unit_test_data/", "", true, F, ok)),
+    os:cmd("rm -fr ./nq_unit_test_data/"),
+
+    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
 
     {ok, _} = nqueue:start_link("test"),
 
@@ -128,8 +132,9 @@ buffer2_test() ->
 
     ?assertEqual(ok, nqueue:stop("test")),
 
+    os:cmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertEqual(ok, filelib:fold_files("./nq_unit_test_data/", "", true, F, ok)),
+    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
 
     {ok, _} = nqueue:start_link("test"),
 
@@ -151,9 +156,9 @@ benchmark1_test() ->
 
     ?assertEqual(ok, application:set_env(nq, max_frag_size, 128000)),
 
-    F = fun (Filename, _) -> ok = file:delete(Filename) end,
+    os:cmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertEqual(ok, filelib:fold_files("./nq_unit_test_data/", "", true, F, ok)),
+    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
 
     {ok, _} = nqueue:start_link("test"),
 
