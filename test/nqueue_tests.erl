@@ -2,34 +2,28 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-setup() -> 
+setup_test() -> 
 
     error_logger:tty(false),
 
-    ok = application:load(nq),
+    os:cmd("rm -fr ./nq_unit_test_data/"),
 
-    ok = application:set_env(nq, base_dir, "./nq_unit_test_data/"),
+    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
 
-    ok = application:set_env(nq, max_frag_size, 128),
+    ?assertEqual(ok, application:load(nq)),
 
-    ok = application:set_env(nq, sync_interval_ms, 5000),
+    ?assertEqual(ok, application:set_env(nq, base_dir, "./nq_unit_test_data/")),
 
-    ok = application:start(nq),
+    ?assertEqual(ok, application:set_env(nq, max_frag_size, 128)),
 
-    ok = filelib:ensure_dir("./nq_unit_test_data/"),
+    ?assertEqual(ok, application:set_env(nq, sync_interval_ms, 5000)),
 
-    F = fun (Filename, _) -> ok = file:delete(Filename) end,
+    ?assertEqual(ok, application:start(nq)),
 
-    ok = filelib:fold_files("./nq_unit_test_data/", "", true, F, ok).
+    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")).
 
-    
-
-teardown() -> 
-    ok = application:stop(nq).
 
 start_link_test() ->
-
-    ok = setup(),
 
     {ok, Pid} = nqueue:start_link("test"),
 
@@ -176,12 +170,22 @@ benchmark1_test() ->
 
     {ok, _} = nqueue:start_link("test"),
 
-    ?assertEqual({error, empty}, nqueue:deq("test")),
+    ?assertEqual({error, empty}, nqueue:deq("test")).
 
-    ok = teardown().
+handle_test() ->
+
+    ?assertEqual({noreply, state}, nqueue:handle_call(crap, dontcare, state)),
+    ?assertEqual({noreply, state}, nqueue:handle_cast(crap, state)),
+    ?assertEqual({noreply, state}, nqueue:handle_info(crap, state)),
+    ?assertEqual({ok, state}, nqueue:code_change(dontcare, state, dontcare)),
+    ?assertEqual(ok, nqueue:terminate(dontcare, dontcare)).
 
 
 
+teardown_test() -> 
+    ?assertEqual(ok, application:stop(nq)),
+    ?assertEqual(ok, application:unload(nq)).
+ 
 
 %Helper funcs
 enqueue_many(QName, Msg, Count) when Count > 0 ->

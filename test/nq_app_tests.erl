@@ -2,7 +2,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-star_test() -> 
+start_test() -> 
 
     error_logger:tty(false),
 
