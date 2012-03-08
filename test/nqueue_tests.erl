@@ -6,26 +6,20 @@ setup_test() ->
 
     error_logger:tty(false),
 
-    os:cmd("rm -fr ./nq_unit_test_data/"),
-
-    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
+    ?assertCmd("rm -fr ./nq_unit_test_data/"),
 
     ?assertEqual(ok, application:load(nq)),
-
-    ?assertEqual(ok, application:set_env(nq, base_dir, "./nq_unit_test_data/")),
 
     ?assertEqual(ok, application:set_env(nq, max_frag_size, 128)),
 
     ?assertEqual(ok, application:set_env(nq, sync_interval_ms, 5000)),
 
-    ?assertEqual(ok, application:start(nq)),
-
-    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")).
+    ?assertEqual(ok, application:start(nq)).
 
 
 start_link_test() ->
 
-    {ok, Pid} = nqueue:start_link("test"),
+    {ok, Pid} = nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}]),
 
     ?assert(is_pid(Pid)),
 
@@ -48,11 +42,9 @@ buffer_test() ->
 
     ?assertEqual(ok, application:set_env(nq, max_frag_size, 128)),
 
-    os:cmd("rm -fr ./nq_unit_test_data/"),
+    ?assertCmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
-
-    {ok, _} = nqueue:start_link("test"),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual(ok, nqueue:enq("test", L)) || L <- lists:seq(1, 100)],
 
@@ -89,28 +81,24 @@ buffer2_test() ->
 
     ?assertEqual(ok, application:set_env(nq, max_frag_size, 128)),
 
-    os:cmd("rm -fr ./nq_unit_test_data/"),
+    ?assertCmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
-
-    {ok, _} = nqueue:start_link("test"),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 16)],
 
     ?assertEqual(ok, nqueue:stop("test")),
 
-    {ok, _} = nqueue:start_link("test"),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 16)],
 
     ?assertEqual(ok, nqueue:stop("test")),
 
 
-    os:cmd("rm -fr ./nq_unit_test_data/"),
+    ?assertCmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
-
-    {ok, _} = nqueue:start_link("test"),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 18)],
 
@@ -118,7 +106,7 @@ buffer2_test() ->
 
     ?assertEqual(ok, nqueue:stop("test")),
 
-    {ok, _} = nqueue:start_link("test"),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 18)],
 
@@ -126,11 +114,9 @@ buffer2_test() ->
 
     ?assertEqual(ok, nqueue:stop("test")),
 
-    os:cmd("rm -fr ./nq_unit_test_data/"),
+    ?assertCmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
-
-    {ok, _} = nqueue:start_link("test"),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 1)],
 
@@ -138,7 +124,7 @@ buffer2_test() ->
 
     ?assertEqual(ok, nqueue:stop("test")),
 
-    {ok, _} = nqueue:start_link("test"),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 1)],
 
@@ -150,11 +136,9 @@ benchmark1_test() ->
 
     ?assertEqual(ok, application:set_env(nq, max_frag_size, 128000)),
 
-    os:cmd("rm -fr ./nq_unit_test_data/"),
+    ?assertCmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertEqual(ok, filelib:ensure_dir("./nq_unit_test_data/")),
-
-    {ok, _} = nqueue:start_link("test"),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     enqueue_many("test", {"username", "password", "27000000000", "499", "clientref", "123456789009876543211234567890123456", "Welcome this is a test message"}, 10000),
 
@@ -168,7 +152,7 @@ benchmark1_test() ->
 
     ?assertEqual(ok, nqueue:stop("test")),
 
-    {ok, _} = nqueue:start_link("test"),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     ?assertEqual({error, empty}, nqueue:deq("test")).
 

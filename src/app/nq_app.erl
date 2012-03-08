@@ -11,25 +11,6 @@
 
 start(_Type, Args) ->
 
-    BaseDir = 
-    case application:get_env(nq, base_dir) of
-    {ok, D} ->
-        D ++ "/";
-
-    undefined ->
-
-        DefaultDir = "./nq_data/",
-
-        ?warn("No base_dir defined, defaulting to " ++ DefaultDir),
-
-        ok = application:set_env(nq, base_dir, DefaultDir),
-
-        DefaultDir
-
-    end,
-
-    ok = filelib:ensure_dir(BaseDir),
-
     case application:get_env(nq, max_frag_size) of
     {ok, S} when (is_integer(S) and (S > 0)) ->
         ok;
