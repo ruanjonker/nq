@@ -19,11 +19,14 @@
 
         enq/2,
         deq/1,
-        sync/1
+        sync/1,
+
+        subscribe/1,
+        unsubscribe/1
 
         ]).
 
--record(state, {tref, qname, meta_dirty = false, rfrag_idx = 0, rfrag_recno = 0, rfrag_cache_size = 0, rfrag_cache = [], rfrag_dirty = false, wfrag_cache = [], wfrag_dirty = false, wfrag_cache_size = 0, wfrag_idx = 0, last_sync = now()}).
+-record(state, {tref, qname, meta_dirty = false, rfrag_idx = 0, rfrag_recno = 0, rfrag_cache_size = 0, rfrag_cache = [], rfrag_dirty = false, wfrag_cache = [], wfrag_dirty = false, wfrag_cache_size = 0, wfrag_idx = 0, last_sync = now(), subs_dict = dict:new()}).
 
 -define(NAME(X), {global, {?MODULE, X}}).
 
@@ -41,6 +44,13 @@ sync(QName) ->
 
 stop(QName) ->
     gen_server:call(?NAME(QName), stop, infinity).
+
+subscribe(QName) ->
+    gen_server:call(?NAME(QName), {subscribe, self()}, infinity).
+    
+
+unsubscribe(QName) ->
+    gen_server:call(?NAME(QName), {unsubscribe, self()}, infinity).
 
 init([QName]) ->
 
@@ -102,6 +112,7 @@ handle_call({enq, Msg}, _, #state{
     NewFragCache = lists:append(FragCache, [<<Size:64/big-unsigned-integer,BinMsg/binary>>]),
 
     {ok, MaxFragCacheSize} = application:get_env(nq, max_frag_size),
+    {ok, SubsNotificationSleepMs} = application:get_env(nq, subs_notification_sleep_ms),
 
     if (NewFragCacheSize >= MaxFragCacheSize) ->
 
@@ -110,7 +121,7 @@ handle_call({enq, Msg}, _, #state{
 
             case write_frag(QName, FragIdx, NewFragCache, RFragIdx, RFragRecNo, WFragIdx + 1) of
             ok ->
-                {reply, ok, State#state{wfrag_cache = [] , wfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache_size = 0, meta_dirty = false}};
+                {reply, ok, State#state{wfrag_cache = [] , wfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache_size = 0, meta_dirty = false}, SubsNotificationSleepMs};
 
             Error ->
                 {reply, Error, State, 5000}
@@ -120,7 +131,7 @@ handle_call({enq, Msg}, _, #state{
 
             case write_frag(QName, FragIdx, NewFragCache, RFragIdx, RFragRecNo, WFragIdx + 1) of
             ok ->
-                {reply, ok, State#state{rfrag_cache = NewFragCache, rfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache = [], wfrag_cache_size = 0, meta_dirty = false}};
+                {reply, ok, State#state{rfrag_cache = NewFragCache, rfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache = [], wfrag_cache_size = 0, meta_dirty = false}, SubsNotificationSleepMs};
 
             Error ->
                 {reply, Error, State, 5000}
@@ -237,11 +248,55 @@ handle_call(sync, _, State) ->
 
     {reply, Res, NewState};
 
+handle_call({subscribe, Pid}, _, #state{subs_dict = SDict} = State) ->
+
+    NewSDict =
+    case dict:find(Pid, SDict) of
+    {ok, _} ->
+        SDict;
+
+    _ ->
+        MonitorRef = erlang:monitor(process, Pid),
+
+        dict:store(Pid, {MonitorRef, now()}, SDict)
+
+    end,
+
+    {reply, ok, State#state{subs_dict = NewSDict}};
+
+handle_call({unsubscribe, Pid}, _, #state{subs_dict = SDict} = State) ->
+
+    NewSDict =
+    case dict:find(Pid, SDict) of
+    {ok, {MonRef, _}} ->
+
+        erlang:demonitor(MonRef),
+
+        dict:erase(Pid, SDict);
+
+    _ ->
+        SDict
+    end,
+
+    {reply, ok, State#state{subs_dict = NewSDict}};
+
 handle_call(_, _, State) ->
     {noreply, State}.
 
 handle_cast(_, State) ->
     {noreply, State}.
+
+handle_info({'DOWN', MonRef, Pid, process, _Info}, State) ->
+
+    erlang:demonitor(MonRef),
+
+    {noreply, State#state{subs_dict = dict:erase(Pid)}};
+
+handle_info(timeout, #state{qname = QName, subs_dict = SDict} = State) ->
+    
+    [Pid ! {nqueue, QName, ready} || {Pid, _} <- dict:to_list(SDict)],
+
+    {noreply, State};
 
 handle_info(_, State) ->
     {noreply, State}.

@@ -44,6 +44,12 @@ start(_Type, Args) ->
         ok = application:set_env(nq, sync_interval_ms, 5000)
     end,
 
+    case application:get_env(nq, subs_notification_sleep_ms) of
+    {ok, SubsNotificationSleepMs} when (is_integer(SubsNotificationSleepMs) and (SubsNotificationSleepMs > 0)) ->
+        ok;
+    _ ->
+        ok = application:set_env(nq, subs_notification_sleep_ms, 1000)
+    end,
 
     'nq_sup':start_link(Args).
 

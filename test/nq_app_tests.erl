@@ -18,6 +18,8 @@ start_test() ->
 
     ?assertEqual({ok, 5000}, application:get_env(nq, sync_interval_ms)),
 
+    ?assertEqual({ok, 1000}, application:get_env(nq, subs_notification_sleep_ms)),
+
     ?assertEqual(ok, application:stop(nq)),
 
     ?assertEqual(ok, application:unload(nq)).
