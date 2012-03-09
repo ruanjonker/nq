@@ -1,3 +1,11 @@
 
 A lightweight queueing lib that will eventually have a pluggable persistence backend ...
 
+To build:
+    make app
+
+To test:
+    make test
+
+
+
