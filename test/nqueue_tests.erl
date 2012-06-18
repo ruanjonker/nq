@@ -14,6 +14,8 @@ setup_test() ->
 
     ?assertEqual(ok, application:set_env(nq, sync_interval_ms, 5000)),
 
+    ?assertEqual(ok, application:set_env(nq, subs_notification_sleep_ms, 1000)),
+
     ?assertEqual(ok, application:start(nq)).
 
 
@@ -29,9 +31,17 @@ enq_test() ->
 
     ?assertEqual(ok, nqueue:enq("test", "12345678")).
 
+size_1_test() ->
+
+    ?assertEqual(1, nqueue:size("test")).
+
 deq_test() ->
     
     ?assertEqual({ok, "12345678"},  nqueue:deq("test")).
+
+size_2_test() ->
+
+    ?assertEqual(0, nqueue:size("test")).
 
 stop_test() ->
 
@@ -45,35 +55,58 @@ buffer_test() ->
     ?assertCmd("rm -fr ./nq_unit_test_data/"),
 
     ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
+    ?assertEqual(0, nqueue:size("test")),
 
     [ ?assertEqual(ok, nqueue:enq("test", L)) || L <- lists:seq(1, 100)],
 
+    ?assertEqual(100, nqueue:size("test")),
+
     [ ?assertEqual({ok, L}, nqueue:deq("test")) || L <- lists:seq(1, 100)],
+    ?assertEqual(0, nqueue:size("test")),
 
     [ ?assertEqual(ok, nqueue:enq("test", L)) || L <- lists:seq(1, 1000)],
 
+    ?assertEqual(1000, nqueue:size("test")),
+
     [ ?assertEqual({ok, L}, nqueue:deq("test")) || L <- lists:seq(1, 1000)],
+    ?assertEqual(0, nqueue:size("test")),
 
     [ ?assertEqual(ok, nqueue:enq("test", L)) || L <- lists:seq(1, 10000)],
 
+    ?assertEqual(10000, nqueue:size("test")),
+
     [ ?assertEqual({ok, L}, nqueue:deq("test")) || L <- lists:seq(1, 10000)],
+    ?assertEqual(0, nqueue:size("test")),
 
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 64)],
 
+    ?assertEqual(64, nqueue:size("test")),
+
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 64)],
+    ?assertEqual(0, nqueue:size("test")),
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 32)],
 
+    ?assertEqual(32, nqueue:size("test")),
+
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 32)],
+    ?assertEqual(0, nqueue:size("test")),
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 3)],
 
+    ?assertEqual(3, nqueue:size("test")),
+
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 3)],
+    ?assertEqual(0, nqueue:size("test")),
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 512)],
 
+    ?assertEqual(512, nqueue:size("test")),
+
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 512)],
+
+    ?assertEqual(0, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:stop("test")).
 
@@ -84,14 +117,17 @@ buffer2_test() ->
     ?assertCmd("rm -fr ./nq_unit_test_data/"),
 
     ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
+    ?assertEqual(0, nqueue:size("test")),
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 16)],
+    ?assertEqual(16, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:stop("test")),
 
     ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 16)],
+    ?assertEqual(0, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:stop("test")),
 
@@ -101,16 +137,21 @@ buffer2_test() ->
     ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 18)],
+    ?assertEqual(18, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:enq("test", <<"**">>)),
+    ?assertEqual(19, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:stop("test")),
 
     ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
+    ?assertEqual(19, nqueue:size("test")),
 
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 18)],
+    ?assertEqual(1, nqueue:size("test")),
 
     ?assertEqual({ok, <<"**">>},  nqueue:deq("test")),
+    ?assertEqual(0, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:stop("test")),
 
@@ -119,16 +160,21 @@ buffer2_test() ->
     ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
     [ ?assertEqual(ok, nqueue:enq("test", <<"12">>)) || _ <- lists:seq(1, 1)],
+    ?assertEqual(1, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:enq("test", <<"**">>)),
+    ?assertEqual(2, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:stop("test")),
 
     ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
+    ?assertEqual(2, nqueue:size("test")),
 
     [ ?assertEqual({ok, <<"12">>}, nqueue:deq("test")) || _ <- lists:seq(1, 1)],
+    ?assertEqual(1, nqueue:size("test")),
 
     ?assertEqual({ok, <<"**">>},  nqueue:deq("test")),
+    ?assertEqual(0, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:stop("test")).
 
@@ -142,9 +188,13 @@ benchmark1_test() ->
 
     enqueue_many("test", {"username", "password", "27000000000", "499", "clientref", "123456789009876543211234567890123456", "Welcome this is a test message"}, 10000),
 
+    ?assertEqual(10000, nqueue:size("test")),
+
     ?assertEqual(ok, nqueue:sync("test")),
 
     dequeue_many("test", {"username", "password", "27000000000", "499", "clientref", "123456789009876543211234567890123456", "Welcome this is a test message"}, 10000),
+
+    ?assertEqual(0, nqueue:size("test")),
 
     ?assertEqual({error, empty}, nqueue:deq("test")),
 
@@ -153,6 +203,8 @@ benchmark1_test() ->
     ?assertEqual(ok, nqueue:stop("test")),
 
     ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
+
+    ?assertEqual(0, nqueue:size("test")),
 
     ?assertEqual({error, empty}, nqueue:deq("test")).
 
