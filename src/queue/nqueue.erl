@@ -31,7 +31,7 @@
 -define(NAME(X), {global, {?MODULE, X}}).
 
 start_link(QName) when is_list(QName) ->
-    start_link(QName, [{storage_mod, nq_storage_file}, {storage_mod_params, "./nqdata/"}]).
+    start_link(QName, [{storage_mod, nq_file}, {storage_mod_params, "./nqdata/"}]).
 
 start_link(QName, Options)->
     gen_server:start_link(?NAME(QName), ?MODULE, [QName, Options], []).

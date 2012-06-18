@@ -31,6 +31,9 @@ clean:
 	rm -fr erl_crash.dump
 	./rebar clean
 
+run: app
+	erl -pa ./ebin -sname nq@$(shell hostname -s)
+
 test: app
 	mkdir -p .eunit
 	./rebar skip_deps=true eunit
