@@ -39,6 +39,33 @@ deq_test() ->
     
     ?assertEqual({ok, "12345678"},  nqueue:deq("test")).
 
+deq_fun_args_test() ->
+
+    F = fun(Q, M, A) ->
+
+        ?assertEqual("test", Q),
+        ?assertEqual("abcd", M),
+        ?assertEqual("myargs", A),
+
+        ok
+
+    end,
+    
+    ?assertEqual(ok, nqueue:enq("test", "abcd")),
+    
+    ?assertEqual({ok, "abcd"},  nqueue:deq("test", F, "myargs")),
+
+    ?assertEqual({error, empty},  nqueue:deq("test", F, "myargs")),
+
+    ?assertEqual(ok, nqueue:enq("test", "abcd")),
+    
+    ?assertMatch({error, _}, nqueue:deq("test", F, "myNrgs")),
+
+    ?assertEqual({ok, "abcd"},  nqueue:deq("test", F, "myargs")),
+
+    ok.
+
+
 size_2_test() ->
 
     ?assertEqual(0, nqueue:size("test")).
@@ -210,13 +237,127 @@ benchmark1_test() ->
 
 handle_test() ->
 
-    ?assertEqual({noreply, state}, nqueue:handle_call(crap, dontcare, state)),
-    ?assertEqual({noreply, state}, nqueue:handle_cast(crap, state)),
-    ?assertEqual({noreply, state}, nqueue:handle_info(crap, state)),
+    ?assertEqual({noreply, state, 0}, nqueue:handle_call(crap, dontcare, state)),
+    ?assertEqual({noreply, state, 0}, nqueue:handle_cast(crap, state)),
+    ?assertEqual({noreply, state, 0}, nqueue:handle_info(crap, state)),
     ?assertEqual({ok, state}, nqueue:code_change(dontcare, state, dontcare)),
     ?assertEqual(ok, nqueue:terminate(dontcare, dontcare)).
 
 
+subscribe_test() ->
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ?assertEqual(ok, nqueue:subscribe("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", hello)),
+
+    receive {nqueue, "test", ready} ->
+
+        ?assertEqual({ok, hello}, nqueue:deq("test"))
+
+    end,
+
+    ?assertEqual(ok, nqueue:enq("test", hello2)),
+
+    receive {nqueue, "test", ready} ->
+
+        ?assertEqual({ok, hello2}, nqueue:deq("test"))
+
+    end,
+
+    ok.
+
+unsubscribe_test() ->
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", hello)),
+
+    receive {nqueue, "test", ready} ->
+
+        ?assertEqual({ok, hello}, nqueue:deq("test"))
+
+    end,
+
+    ?assertEqual(ok, nqueue:unsubscribe("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", hello)),
+
+    GotEvent =
+    receive {nqueue, "test", ready} ->
+        true
+
+    after 1000 ->
+        false
+
+    end,
+
+    ?assert(not GotEvent),
+
+    ?assertEqual(ok, nqueue:unsubscribe("test")),
+
+    ?assertEqual(1, nqueue:size("test")),
+
+    ?assertEqual(ok, nqueue:subscribe("test")),
+
+    receive {nqueue, "test", ready} ->
+
+        ?assertEqual({ok, hello}, nqueue:deq("test"))
+
+    end,
+
+    ?assertEqual(ok, nqueue:subscribe("test")),
+
+    ?assertEqual(ok, nqueue:unsubscribe("test")),
+
+    ok.
+
+
+down_test() ->
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ?assertEqual(0, nqueue:subscriber_count("test")),
+
+    Caller = self(),
+
+    F = fun () ->
+
+        ?assertEqual(ok, nqueue:subscribe("test")),
+
+        Caller ! the_pig_is_alive,
+
+        receive M0 ->
+            ?assertEqual(M0, die_pig_die)
+        end
+
+    end,
+
+    Pid = erlang:spawn(F),
+
+    ?assert(is_pid(Pid)),
+
+    Ref = erlang:monitor(process, Pid),
+
+    receive M1 ->
+        ?assertEqual(M1, the_pig_is_alive)
+
+    end,
+
+    Pid ! die_pig_die,
+ 
+    receive M2 ->   
+        ?assertMatch( {'DOWN', Ref, process, Pid, normal}, M2)
+
+    end,
+
+    ?assert(not  erlang:is_process_alive(Pid)),
+
+    ?assertEqual(0, nqueue:subscriber_count("test")),
+
+    ok.
+    
 
 teardown_test() -> 
     ?assertEqual(ok, application:stop(nq)),
@@ -239,12 +380,6 @@ dequeue_many(QName, Msg, Count) when Count > 0 ->
     dequeue_many(QName, Msg, Count -1);
 
 dequeue_many(_, _, 0) -> ok.
-
-
-
-
-
-
 
 
 %EOF

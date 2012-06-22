@@ -32,6 +32,14 @@ start(_Type, Args) ->
         ok = application:set_env(nq, subs_notification_sleep_ms, 1000)
     end,
 
+    %{"./nqdata/consumer_cache/", 16, 1, 4096, 5000}
+    case application:get_env(nq, consumer_cache_cfg) of
+    {ok, {_, _, _, _, _}} -> 
+        ok;
+    _ ->
+        ok = application:set_env(nq, consumer_cache_cfg, {"./nqdata/consumer_cache/", 16, 1, 4096, 5000})
+    end,
+
     'nq_sup':start_link(Args).
 
 prep_stop(State) ->

@@ -19,12 +19,14 @@
 
         enq/2,
         deq/1,
+        deq/3,
         sync/1,
 
         size/1,
 
         subscribe/1,
-        unsubscribe/1
+        unsubscribe/1,
+        subscriber_count/1
 
         ]).
 
@@ -42,7 +44,10 @@ enq(QName, Msg) ->
     gen_server:call(?NAME(QName), {enq, Msg}, infinity).
 
 deq(QName) ->
-    gen_server:call(?NAME(QName), deq, infinity).
+    deq(QName, undefined, undefined).
+
+deq(QName, Fun, Args) when is_function(Fun, 3) or ((Fun == undefined) and (Args == undefined)) ->
+    gen_server:call(?NAME(QName), {deq, Fun, Args}, infinity).
 
 sync(QName) ->
     gen_server:call(?NAME(QName), sync, infinity).
@@ -56,9 +61,12 @@ stop(QName) ->
 subscribe(QName) ->
     gen_server:call(?NAME(QName), {subscribe, self()}, infinity).
     
-
 unsubscribe(QName) ->
     gen_server:call(?NAME(QName), {unsubscribe, self()}, infinity).
+
+subscriber_count(QName) ->
+    gen_server:call(?NAME(QName), subscriber_count, infinity).
+
 
 init([QName, Options]) ->
 
@@ -124,29 +132,28 @@ handle_call({enq, Msg}, _, #state{
     NewFragCache = lists:append(FragCache, [<<Size:64/big-unsigned-integer,BinMsg/binary>>]),
 
     {ok, MaxFragCacheSize} = application:get_env(nq, max_frag_size),
-    {ok, SubsNotificationSleepMs} = application:get_env(nq, subs_notification_sleep_ms),
 
     if (NewFragCacheSize >= MaxFragCacheSize) ->
 
         case WriteBuffer of
         w ->
 
-            case StorageMod:write_frag(QName, FragIdx, NewFragCache, Qsize + 1, RFragIdx, RFragRecNo, WFragIdx + 1, StorageModParams) of
+            case catch(StorageMod:write_frag(QName, FragIdx, NewFragCache, Qsize + 1, RFragIdx, RFragRecNo, WFragIdx + 1, StorageModParams)) of
             ok ->
-                {reply, ok, State#state{wfrag_cache = [], size = Qsize + 1, wfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache_size = 0, meta_dirty = false}, SubsNotificationSleepMs};
+                {reply, ok, State#state{wfrag_cache = [], size = Qsize + 1, wfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache_size = 0, meta_dirty = false}, 0};
 
             Error ->
-                {reply, Error, State, 5000}
+                {reply, Error, State}
             end;
 
         r ->
 
-            case StorageMod:write_frag(QName, FragIdx, NewFragCache, Qsize + 1, RFragIdx, RFragRecNo, WFragIdx + 1, StorageModParams) of
+            case catch(StorageMod:write_frag(QName, FragIdx, NewFragCache, Qsize + 1, RFragIdx, RFragRecNo, WFragIdx + 1, StorageModParams)) of
             ok ->
-                {reply, ok, State#state{rfrag_cache = NewFragCache, size = Qsize + 1, rfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache = [], wfrag_cache_size = 0, meta_dirty = false}, SubsNotificationSleepMs};
+                {reply, ok, State#state{rfrag_cache = NewFragCache, size = Qsize + 1, rfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache = [], wfrag_cache_size = 0, meta_dirty = false}, 0};
 
             Error ->
-                {reply, Error, State, 5000}
+                {reply, Error, State}
             end
 
         end;
@@ -155,98 +162,81 @@ handle_call({enq, Msg}, _, #state{
 
         case WriteBuffer of
         w ->
-            {reply, ok, State#state{wfrag_cache = NewFragCache, size = Qsize + 1, wfrag_cache_size = NewFragCacheSize, wfrag_dirty = true}, 5000};
+            {reply, ok, State#state{wfrag_cache = NewFragCache, size = Qsize + 1, wfrag_cache_size = NewFragCacheSize, wfrag_dirty = true}, 0};
 
         r ->
-            {reply, ok, State#state{rfrag_cache = NewFragCache, size = Qsize + 1, rfrag_cache_size = NewFragCacheSize, rfrag_dirty = true}, 5000}
+            {reply, ok, State#state{rfrag_cache = NewFragCache, size = Qsize + 1, rfrag_cache_size = NewFragCacheSize, rfrag_dirty = true}, 0}
 
         end
 
     end;
 
-
-handle_call(deq, _, #state{ qname = QName, size = Qsize,
+handle_call({deq, Fun, Args}, _, #state{ qname = QName, size = Qsize,
                             storage_mod = StorageMod, storage_mod_params = StorageModParams,
                             wfrag_idx = WIdx, rfrag_idx = RIdx, rfrag_cache = RData, wfrag_cache = WData, rfrag_recno = RFragRecno, wfrag_dirty = WDirty} = State) ->
 
-    case RData of
-    [<<_:64/big-unsigned-integer,BinMsg/binary>> | Tail] ->
-        {reply, {ok, binary_to_term(BinMsg)}, State#state{rfrag_cache = Tail, size = Qsize - 1, meta_dirty = true, rfrag_recno = RFragRecno + 1}};
+    if (Qsize == 0) ->
+        {reply, {error, empty}, State};
 
-    [] ->
+    true ->
 
-        if (WIdx == RIdx) ->
-            {reply, {error, empty}, State};
+        case RData of
+        [] ->
+            %If the read buffer has been depleted, we need to either load from 
+            %disk or seed from write buffer if the write buffer index is the next
+            %after the read buffer index.
 
-        ((WIdx - RIdx) == 1) ->
+            if (WIdx == (RIdx + 1)) ->
 
-            case WData of
-            [<<_:64/big-unsigned-integer,BinMsg/binary>> | Tail] ->
-            
-                case StorageMod:trash_frag(QName, RIdx, StorageModParams) of
+                case catch(StorageMod:write_meta(QName, Qsize, RIdx + 1, 0, WIdx, StorageModParams)) of
                 ok ->
 
-                    if WDirty ->
+                    catch(StorageMod:trash_frag(QName, RIdx, StorageModParams)),
 
-                        case StorageMod:write_frag(QName, WIdx, WData, Qsize - 1,  WIdx, 1, WIdx, StorageModParams) of
-                        ok ->
-                            {reply, {ok, binary_to_term(BinMsg)}, State#state{ rfrag_idx = WIdx, size = Qsize - 1, rfrag_recno = 1, rfrag_cache = Tail, meta_dirty = false, wfrag_dirty = false, rfrag_dirty = false}};
+                    [<<_:64/big-unsigned-integer,BinMsg/binary>> | Tail] = WData,
 
-                        Error ->
-                            {reply, Error, State}
+                    do_deq(QName, BinMsg, Fun, Args, 
+                            State#state{ rfrag_idx = WIdx, size = Qsize - 1, rfrag_recno = 1, rfrag_cache = Tail, wfrag_cache = [], meta_dirty = false, wfrag_dirty = false, rfrag_dirty = WDirty},
+                            State#state{ rfrag_idx = WIdx, size = Qsize, rfrag_recno = 0, rfrag_cache = WData, wfrag_cache = [], meta_dirty = false, wfrag_dirty = false, rfrag_dirty = WDirty});
 
-                        end;
-
-                    true ->
-
-                        case StorageMod:write_meta(QName, Qsize - 1, WIdx, 1, WIdx, StorageModParams) of
-                        ok ->
-                            {reply, {ok, binary_to_term(BinMsg)}, State#state{ rfrag_idx = WIdx, size = Qsize - 1, rfrag_recno = 1, rfrag_cache = Tail, meta_dirty = false, wfrag_dirty = false, rfrag_dirty = false}};
-
-                        Error ->
-                            {reply, Error, State}
-
-                        end
-
-                    end;
 
                 Error ->
                     {reply, Error, State}
 
                 end;
 
-            [] ->
-                {reply, {error, empty}, State}
+            true ->
+
+                case read_next_frag_for_deq(QName, Qsize, RIdx, WIdx, StorageMod, StorageModParams) of
+                {ok, [<<_:64/big-unsigned-integer,BinMsg/binary>> | Tail] = Frag} ->
+
+                    do_deq(QName, BinMsg, Fun, Args, 
+                        State#state{ size = Qsize - 1, rfrag_idx = RIdx + 1, rfrag_recno = 1, rfrag_cache = Tail, meta_dirty = true, rfrag_dirty = false},
+                        State#state{ size = Qsize, rfrag_idx = RIdx + 1, rfrag_recno = 0, rfrag_cache = Frag, meta_dirty = false, rfrag_dirty = false});
+
+                Error ->
+                    {reply, Error, State}
+
+                end
 
             end;
 
-        true ->
 
-            case read_frag(QName, RIdx + 1, 0, StorageMod, StorageModParams) of
-            {ok, [<<_:64/big-unsigned-integer,BinMsg/binary>> | Tail]} ->
+        [<<_:64/big-unsigned-integer,BinMsg/binary>> | Tail] ->
 
-                case StorageMod:trash_frag(QName, RIdx, StorageModParams) of
-                ok ->
-                    {reply, {ok, binary_to_term(BinMsg)}, State#state{ size = Qsize - 1, rfrag_idx = RIdx + 1, rfrag_recno = 1, rfrag_cache = Tail, meta_dirty = true, rfrag_dirty = false}};
-
-                Error ->
-                    {reply, Error, State}
-
-                end;
-
-            {ok, []} ->
-                {reply, {error, empty_frag}, State};
-
-            Error ->
-                {reply, Error, State}
-            end
+            do_deq(QName, BinMsg, Fun, Args, State#state{rfrag_cache = Tail, size = Qsize - 1, meta_dirty = true, rfrag_recno = RFragRecno + 1}, State)
 
         end
 
     end;
 
 handle_call(size, _, #state{size = Qsize} = State) ->
-    {reply, Qsize, State};
+
+    if (Qsize > 0) ->
+        {reply, Qsize, State, 0};
+    true ->
+        {reply, Qsize, State}
+    end;
 
 handle_call(stop, _, State) ->
 
@@ -259,13 +249,22 @@ handle_call(stop, _, State) ->
 
     end;
 
-handle_call(sync, _, State) ->
+handle_call(sync, _, #state{size = Qsize} = State) ->
+
 
     {Res, NewState} = do_sync(State),
 
-    {reply, Res, NewState};
+    if (Qsize > 0) ->
+        {reply, Res, NewState, 0};
+    true ->
+        {reply, Res, NewState}
+        
+    end;
 
-handle_call({subscribe, Pid}, _, #state{subs_dict = SDict} = State) ->
+handle_call(subscriber_count, _, #state{subs_dict = SDict} = State) ->
+    {reply, dict:size(SDict), State, 0};
+
+handle_call({subscribe, Pid}, _, #state{subs_dict = SDict, size = Qsize} = State) ->
 
     NewSDict =
     case dict:find(Pid, SDict) of
@@ -279,9 +278,16 @@ handle_call({subscribe, Pid}, _, #state{subs_dict = SDict} = State) ->
 
     end,
 
-    {reply, ok, State#state{subs_dict = NewSDict}};
+    if (Qsize > 0) ->
+   
+        {reply, ok, State#state{subs_dict = NewSDict}, 0};
 
-handle_call({unsubscribe, Pid}, _, #state{subs_dict = SDict} = State) ->
+    true ->
+        {reply, ok, State#state{subs_dict = NewSDict}}
+
+    end;
+
+handle_call({unsubscribe, Pid}, _, #state{subs_dict = SDict, size = Qsize} = State) ->
 
     NewSDict =
     case dict:find(Pid, SDict) of
@@ -295,28 +301,38 @@ handle_call({unsubscribe, Pid}, _, #state{subs_dict = SDict} = State) ->
         SDict
     end,
 
-    {reply, ok, State#state{subs_dict = NewSDict}};
+    if (Qsize > 0) ->
+        {reply, ok, State#state{subs_dict = NewSDict}, 0};
+    true ->
+        {reply, ok, State#state{subs_dict = NewSDict}}
+    end;
 
 handle_call(_, _, State) ->
-    {noreply, State}.
+    {noreply, State, 0}.
 
 handle_cast(_, State) ->
-    {noreply, State}.
+    {noreply, State, 0}.
 
-handle_info({'DOWN', MonRef, Pid, process, _Info}, State) ->
+handle_info({'DOWN', MonRef, process, Pid, _Info}, #state{subs_dict = SDict} = State) ->
 
     erlang:demonitor(MonRef),
 
-    {noreply, State#state{subs_dict = dict:erase(Pid)}};
+    {noreply, State#state{subs_dict = dict:erase(Pid, SDict)}, 0};
 
-handle_info(timeout, #state{qname = QName, subs_dict = SDict} = State) ->
+handle_info(timeout, #state{qname = QName, size = Qsize, subs_dict = SDict} = State) ->
     
-    [Pid ! {nqueue, QName, ready} || {Pid, _} <- dict:to_list(SDict)],
+    if (Qsize > 0) ->
+        [Pid ! {nqueue, QName, ready} || {Pid, _} <- dict:to_list(SDict)];
 
-    {noreply, State};
+    true ->
+        ok
+
+    end,
+
+    {noreply, State, 10000};
 
 handle_info(_, State) ->
-    {noreply, State}.
+    {noreply, State, 0}.
 
 code_change(_, State, _) ->
     {ok, State}.
@@ -333,7 +349,7 @@ do_sync(#state{ qname = QName, size = Qsize,
 
         %Example: Only the head pointer has moved ...
 
-        case StorageMod:write_meta(QName, Qsize, RFragIdx, RFragRecNo, WFragIdx, StorageModParams) of
+        case catch(StorageMod:write_meta(QName, Qsize, RFragIdx, RFragRecNo, WFragIdx, StorageModParams)) of
         ok ->
 
             {ok, State#state{meta_dirty = false, last_sync = now()}};
@@ -345,10 +361,10 @@ do_sync(#state{ qname = QName, size = Qsize,
 
     RDirty ->
 
-        case StorageMod:write_frag(QName, RFragIdx, RData, StorageModParams) of
+        case catch(StorageMod:write_frag(QName, RFragIdx, RData, StorageModParams)) of
         ok ->
 
-            case StorageMod:write_meta(QName, Qsize,  RFragIdx, RFragRecNo, WFragIdx, StorageModParams) of
+            case catch(StorageMod:write_meta(QName, Qsize,  RFragIdx, RFragRecNo, WFragIdx, StorageModParams)) of
             ok ->
 
                 {ok, State#state{wfrag_dirty = false, last_sync = now()}};
@@ -365,10 +381,10 @@ do_sync(#state{ qname = QName, size = Qsize,
 
     WDirty ->
 
-        case StorageMod:write_frag(QName, WFragIdx, WData, StorageModParams) of
+        case catch(StorageMod:write_frag(QName, WFragIdx, WData, StorageModParams)) of
         ok ->
 
-            case StorageMod:write_meta(QName, Qsize, RFragIdx, RFragRecNo, WFragIdx, StorageModParams) of
+            case catch(StorageMod:write_meta(QName, Qsize, RFragIdx, RFragRecNo, WFragIdx, StorageModParams)) of
             ok ->
 
                 {ok, State#state{wfrag_dirty = false, last_sync = now()}};
@@ -408,13 +424,51 @@ parse_frag(<<>>, MsgList, _, _) -> {ok, MsgList}.
 
 read_frag(QName, FragIdx, RecNo, StorageMod, StorageModParams) ->
 
-    case StorageMod:read_frag(QName, FragIdx, StorageModParams) of
+    case catch(StorageMod:read_frag(QName, FragIdx, StorageModParams)) of
     {ok, Data} when is_binary(Data) ->
-        parse_frag(Data, [], 0, RecNo);
+        catch(parse_frag(Data, [], 0, RecNo));
 
     Error ->
         Error
 
     end.
+
+do_deq(_, BinMessage, undefined, _, NewStateSuccess, _) -> {reply, {ok, binary_to_term(BinMessage)}, NewStateSuccess};
+do_deq(QName, BinMessage, Fun, Args, NewStateSuccess, NewStateFail) ->
+
+    Message = binary_to_term(BinMessage),
+
+    case catch(Fun(QName,Message,Args)) of
+    ok ->
+        {reply, {ok, Message}, NewStateSuccess};
+    Error ->
+        {reply, {error, Error}, NewStateFail}
+    end.
+ 
+read_next_frag_for_deq(QName, Qsize, RIdx, WIdx, StorageMod, StorageModParams) ->
+
+    case read_frag(QName, RIdx + 1, 0, StorageMod, StorageModParams) of
+    {ok, []} ->
+        {error, empty_frag};
+
+    {ok, Frag} ->
+
+        case catch(StorageMod:write_meta(QName, Qsize, RIdx + 1, 0, WIdx, StorageModParams)) of
+        ok ->
+
+            catch(StorageMod:trash_frag(QName, RIdx, StorageModParams)),
+
+            {ok, Frag};
+
+       Error ->
+           {error, Error}
+
+       end;
+
+   Error ->
+       {error, Error}
+
+   end.
+
 
 %EOF
