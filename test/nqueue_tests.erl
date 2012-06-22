@@ -360,6 +360,13 @@ down_test() ->
     
 
 teardown_test() -> 
+
+    P2 = global:whereis_name({nqueue, "test"}),
+
+    unlink(P2),
+
+    exit(P2, kill),
+
     ?assertEqual(ok, application:stop(nq)),
     ?assertEqual(ok, application:unload(nq)).
  

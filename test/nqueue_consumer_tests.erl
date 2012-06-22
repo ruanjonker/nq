@@ -40,6 +40,8 @@ consume_1_test() ->
 
     end,
 
+    ?assertEqual(ok, bdb_store:sync("consumer_cache")),
+
     ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
 
 
