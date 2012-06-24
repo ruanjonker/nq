@@ -43,6 +43,9 @@ start(_Type, Args) ->
     'nq_sup':start_link(Args).
 
 prep_stop(State) ->
+
+    ok = bdb_store:sync("consumer_cache"),
+
     State.
 
 stop(_State)->

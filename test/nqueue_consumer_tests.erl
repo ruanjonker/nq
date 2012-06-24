@@ -151,7 +151,35 @@ consume_err_err_fun_test_() ->
 
     end]}.
 
+receive_many_test_() ->
 
+    {timeout, 60000, [fun() ->
+
+        ?assertEqual(ok, nqueue_consumer:set_state("test", paused)),
+        ?assertEqual(paused, nqueue_consumer:get_state("test")),
+        ?assertEqual(0, nqueue:size("test")),
+        ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
+
+
+        ?assertEqual(ok, enqueue_many("test", "this is a test message", 100000)),
+
+        ?assertEqual(100000, nqueue:size("test")),
+
+        F1 = fun(_,M,A) -> A ! M, ok end,
+
+        ?assertEqual(ok, nqueue_consumer:set_fun("test", F1, self())),
+ 
+        ?assertEqual(ok, nqueue_consumer:set_state("test", unpaused)),
+
+        ?assertEqual(ok, receive_many("this is a test message", 100000)),
+
+        ?assertEqual(0, nqueue:size("test")),
+
+        ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
+
+        ok
+
+    end]}.
 
 teardown_test() ->
 
@@ -169,5 +197,25 @@ teardown_test() ->
     ?assertEqual(ok, application:unload(nq)),
 
     ok.
+
+
+enqueue_many(QName, Msg, Count) when Count > 0 ->
+
+    ok = nqueue:enq("test", Msg),
+
+    enqueue_many(QName, Msg, Count -1);
+
+enqueue_many(_, _, 0) -> ok.
+
+receive_many(Msg, Count) when Count > 0 ->
+    receive M3 ->
+        ?assertEqual(M3, Msg)
+
+    end,
+
+    receive_many(Msg, Count - 1);
+
+receive_many(_, 0) -> ok.
+
 
 
