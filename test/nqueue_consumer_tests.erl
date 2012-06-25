@@ -161,9 +161,9 @@ receive_many_test_() ->
         ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
 
 
-        ?assertEqual(ok, enqueue_many("test", "this is a test message", 100000)),
+        ?assertEqual(ok, enqueue_many("test", "this is a test message", 10000)),
 
-        ?assertEqual(100000, nqueue:size("test")),
+        ?assertEqual(10000, nqueue:size("test")),
 
         F1 = fun(_,M,A) -> A ! M, ok end,
 
@@ -171,7 +171,7 @@ receive_many_test_() ->
  
         ?assertEqual(ok, nqueue_consumer:set_state("test", unpaused)),
 
-        ?assertEqual(ok, receive_many("this is a test message", 100000)),
+        ?assertEqual(ok, receive_many("this is a test message", 10000)),
 
         ?assertEqual(0, nqueue:size("test")),
 

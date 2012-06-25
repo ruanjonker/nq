@@ -21,7 +21,7 @@ setup_test() ->
 
 start_link_test() ->
 
-    {ok, Pid} = nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}]),
+    {ok, Pid} = nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}, {auto_sync, false}]),
 
     ?assert(is_pid(Pid)),
 
@@ -31,13 +31,91 @@ enq_test() ->
 
     ?assertEqual(ok, nqueue:enq("test", "12345678")).
 
+get_meta_1_test() ->
+
+    BinMsg = term_to_binary("12345678"),
+
+    BinMsgSize = size(BinMsg),
+
+    Ce = <<BinMsgSize:64/unsigned-integer-big, BinMsg/binary>>,
+
+    RS1 = 8 + BinMsgSize,
+
+    ?assertMatch({1, true, 0, 0, RS1, [Ce], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+
+    RS2 = 2 * RS1,
+
+    ?assertMatch({2, true, 0, 0, RS2, [Ce, Ce], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+
+    RS3 = 3 * RS1,
+
+    ?assertMatch({3, true, 0, 0, RS3, [Ce, Ce, Ce], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+
+    RS4 = 4 * RS1,
+
+    ?assertMatch({4, true, 0, 0, RS4, [Ce, Ce, Ce, Ce], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual({ok, "12345678"}, nqueue:deq("test")),
+   
+    ?assertMatch({3, true, 0, 0, RS3, [Ce, Ce, Ce], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual({ok, "12345678"}, nqueue:deq("test")),
+   
+    ?assertMatch({2, true, 0, 0, RS2, [Ce, Ce], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual({ok, "12345678"}, nqueue:deq("test")),
+   
+    ?assertMatch({1, true, 0, 0, RS1, [Ce], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual({ok, "12345678"}, nqueue:deq("test")),
+   
+    ?assertMatch({0, true, 0, 0, 0, [], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual({error, empty}, nqueue:deq("test")),
+   
+    ?assertMatch({0, true, 0, 0, 0, [], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:sync("test")),
+
+    ?assertMatch({0, false, 0, 0, 0, [], false, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ok.
+
 size_1_test() ->
 
-    ?assertEqual(1, nqueue:size("test")).
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+
+    ?assertMatch(N when (is_integer(N) and (N >= 0)), nqueue:size("test")).
+
+purge_test() ->
+
+    ?assertMatch(N when N > 0, nqueue:size("test")),
+
+    ?assertEqual(ok, nqueue:purge("test")),
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ok.
 
 deq_test() ->
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+
+    ?assertEqual(1, nqueue:size("test")),
     
-    ?assertEqual({ok, "12345678"},  nqueue:deq("test")).
+    ?assertEqual({ok, "12345678"},  nqueue:deq("test")),
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ok.
 
 deq_fun_args_test() ->
 
@@ -72,16 +150,95 @@ size_2_test() ->
 
 stop_test() ->
 
-    ?assertEqual(ok, nqueue:stop("test")).
+    PX = global:whereis_name({nqueue, "test"}),
+
+    ?assertEqual(ok, nqueue:stop("test")),
+
+    ?assertEqual(ok, wait_to_die(PX)).
 
 
-buffer_test() ->
+buffer_1_test() ->
+
+    BinMsg = term_to_binary("12345678"),
+
+    BinMsgSize = size(BinMsg),
+
+    ?assertEqual(ok, application:set_env(nq, max_frag_size, (8 + BinMsgSize) * 2)),
+
+    ?assertCmd("rm -fr ./nq_unit_test_data/"),
+
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}, {auto_sync, false}])),
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    Ce = <<BinMsgSize:64/unsigned-integer-big, BinMsg/binary>>,
+
+    RS1 = 8 + BinMsgSize,
+
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+    ?assertMatch({1, true, 0, 0, RS1, [Ce], true, 0, 0, [], false, _}, nqueue:get_meta("test")),
+
+    RS2 = RS1 * 2,
+
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+    ?assertMatch({2, false, 0, 0, RS2, [Ce, Ce], false, 1, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+    ?assertMatch({3, false, 0, 0, RS2, [Ce, Ce], false, 1, RS1, [Ce], true, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+    ?assertMatch({4, false, 0, 0, RS2, [Ce, Ce], false, 2, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", "12345678")),
+    ?assertMatch({5, false, 0, 0, RS2, [Ce, Ce], false, 2, RS1, [Ce], true, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:sync("test")),
+    ?assertMatch({5, false, 0, 0, RS2, [Ce, Ce], false, 2, RS1, [Ce], false, _}, nqueue:get_meta("test")),
+
+
+    ?assertEqual({ok, "12345678"}, nqueue:deq("test")),
+    ?assertMatch({4, true, 0, 1, RS2, [Ce, Ce], false, 2, RS1, [Ce], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual({ok, "12345678"}, nqueue:deq("test")),
+    ?assertMatch({3, true, 0, 2, RS2, [Ce, Ce], false, 2, RS1, [Ce], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual({ok, "12345678"}, nqueue:deq("test")),
+    ?assertMatch({2, true, 1, 1, RS2, [Ce, Ce], false, 2, RS1, [Ce], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual({ok, "12345678"}, nqueue:deq("test")),
+    ?assertMatch({1, true, 1, 2, RS2, [Ce, Ce], false, 2, RS1, [Ce], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:stop("test")),
+
+    P1 = global:whereis_name({nqueue, "test"}),
+
+    ?assertEqual(ok, wait_to_die(P1)),
+
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}, {auto_sync, false}])),
+
+    ?assertEqual(1, nqueue:size("test")),
+    ?assertMatch({1, false, 1, 2, RS2, [Ce, Ce], false, 2, RS1, [Ce], false, _}, nqueue:get_meta("test")),
+
+
+    ?assertEqual({ok, "12345678"}, nqueue:deq("test")),
+    ?assertMatch({0, true, 2, 1, RS1, [Ce], false, 2, 0, [], false, _}, nqueue:get_meta("test")),
+
+    ?assertEqual(ok, nqueue:stop("test")),
+
+    PX = global:whereis_name({nqueue, "test"}),
+
+    ?assertEqual(ok, wait_to_die(PX)),
+
+    ok.
+
+buffer_2_test() ->
+
 
     ?assertEqual(ok, application:set_env(nq, max_frag_size, 128)),
 
     ?assertCmd("rm -fr ./nq_unit_test_data/"),
 
-    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
+    ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}, {auto_sync, false}])),
     ?assertEqual(0, nqueue:size("test")),
 
     [ ?assertEqual(ok, nqueue:enq("test", L)) || L <- lists:seq(1, 100)],
@@ -213,13 +370,13 @@ benchmark1_test() ->
 
     ?assertMatch({ok, _}, nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nq_unit_test_data/"}])),
 
-    enqueue_many("test", {"username", "password", "27000000000", "499", "clientref", "123456789009876543211234567890123456", "Welcome this is a test message"}, 10000),
+    enqueue_many("test", {"username", "password", "27000000000", "499", "clientref", "123456789009876543211234567890123456", "Welcome this is a test message"}, 1000),
 
-    ?assertEqual(10000, nqueue:size("test")),
+    ?assertEqual(1000, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:sync("test")),
 
-    dequeue_many("test", {"username", "password", "27000000000", "499", "clientref", "123456789009876543211234567890123456", "Welcome this is a test message"}, 10000),
+    dequeue_many("test", {"username", "password", "27000000000", "499", "clientref", "123456789009876543211234567890123456", "Welcome this is a test message"}, 1000),
 
     ?assertEqual(0, nqueue:size("test")),
 
@@ -357,7 +514,43 @@ down_test() ->
     ?assertEqual(0, nqueue:subscriber_count("test")),
 
     ok.
-    
+ 
+peek_test() ->
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ?assertEqual(0, nqueue:subscriber_count("test")),
+
+    ?assertEqual(ok, nqueue:enq("test", hello)),
+
+    ?assertEqual({ok, hello}, nqueue:peek("test")),
+
+    ?assertEqual(1, nqueue:size("test")),
+
+    ?assertEqual({ok, hello}, nqueue:deq("test")),
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ?assertEqual({error, empty}, nqueue:deq("test")),
+
+    ok.   
+
+enq_deq_many_test_() ->
+
+    {timeout, 30000, [fun() ->
+
+        ?assertEqual(0, nqueue:size("test")),
+
+        ?assertEqual(ok, nqueue:sync("test")),
+
+        ?assertEqual(0, nqueue:size("test")),
+
+        ?assertEqual(ok, enq_deq_many("test", "test message 12345", 10000)),
+
+        ok
+
+    end]}.
+
 
 teardown_test() -> 
 
@@ -387,6 +580,32 @@ dequeue_many(QName, Msg, Count) when Count > 0 ->
     dequeue_many(QName, Msg, Count -1);
 
 dequeue_many(_, _, 0) -> ok.
+
+
+enq_deq_many(QName, Msg, Count) when Count > 0 ->
+
+    ?assertEqual(ok, nqueue:enq(QName, {Msg, Count})),
+
+    ?assertEqual({ok, {Msg, Count}}, nqueue:deq(QName)),
+
+    enq_deq_many(QName, Msg, Count - 1); 
+
+enq_deq_many(_, _, 0) -> ok.
+
+
+wait_to_die(Pid) ->
+
+    Alive = erlang:is_process_alive(Pid),
+
+    if (not Alive) ->
+        ok;
+    true ->
+        timer:sleep(10),
+        wait_to_die(Pid)
+    end.
+
+
+
 
 
 %EOF
