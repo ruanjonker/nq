@@ -1,5 +1,7 @@
 -module(nq_file).
 
+-behaviour(nq_queue_storage).
+
 -export([
         init/2,
         read_frag/3,

@@ -4,6 +4,7 @@
 -compile(export_all).
 
 -include("nq.hrl").
+-include("nq_queue.hrl").
 
 -export([
         start_link/1,
@@ -35,8 +36,6 @@
         subscriber_count/1
 
         ]).
-
--record(state, {tref, qname, size = 0, meta_dirty = false, rfrag_idx = 0, rfrag_recno = 0, rfrag_cache_size = 0, rfrag_cache = [], rfrag_dirty = false, wfrag_cache = [], wfrag_dirty = false, wfrag_cache_size = 0, wfrag_idx = 0, last_sync = now(), subs_dict = dict:new(), storage_mod = nq_file, storage_mod_params = "./nqdata/", max_frag_size = 64000, auto_sync = true}).
 
 -define(NAME(X), {global, {?MODULE, X}}).
 
@@ -93,6 +92,8 @@ subscriber_count(QName) ->
 
 
 init([QName, Options]) ->
+
+    process_flag(trap_exit, true),
 
     {ok, DefaultSyncIntervalMs} = application:get_env(nq, sync_interval_ms),
     {ok, DefaultMaxFragSize}    = application:get_env(nq, max_frag_size),
@@ -169,6 +170,7 @@ handle_call({enq, Msg}, _, #state{
 
     {ok, MaxFragCacheSize} = application:get_env(nq, max_frag_size),
 
+    {Reply, ReplyState} = 
     if (NewFragCacheSize >= MaxFragCacheSize) ->
 
         case WriteBuffer of
@@ -176,22 +178,22 @@ handle_call({enq, Msg}, _, #state{
 
             case catch(StorageMod:write_frag(QName, FragIdx, NewFragCache, Qsize + 1, RFragIdx, RFragRecNo, WFragIdx + 1, StorageModParams)) of
             ok ->
-                {reply, ok, State#state{wfrag_cache = [], size = Qsize + 1, wfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache_size = 0, meta_dirty = false}, 0};
+                {ok, State#state{wfrag_cache = [], size = Qsize + 1, wfrag_dirty = false, wfrag_idx = WFragIdx + 1, wfrag_cache_size = 0, meta_dirty = false}};
 
             Error ->
-                {reply, Error, State}
+                {Error, State}
             end;
 
         r ->
 
             case catch(StorageMod:write_frag(QName, FragIdx, NewFragCache, Qsize + 1, RFragIdx, RFragRecNo, WFragIdx + 1, StorageModParams)) of
             ok ->
-                {reply, ok, State#state{rfrag_cache = NewFragCache, rfrag_cache_size = NewFragCacheSize, 
+                {ok, State#state{rfrag_cache = NewFragCache, rfrag_cache_size = NewFragCacheSize, 
                                         size = Qsize + 1, rfrag_dirty = false, 
-                                        wfrag_idx = WFragIdx + 1, wfrag_cache = [], wfrag_cache_size = 0, meta_dirty = false, wfrag_dirty = false}, 0};
+                                        wfrag_idx = WFragIdx + 1, wfrag_cache = [], wfrag_cache_size = 0, meta_dirty = false, wfrag_dirty = false}};
 
             Error ->
-                {reply, Error, State}
+                {Error, State}
             end
 
         end;
@@ -200,13 +202,21 @@ handle_call({enq, Msg}, _, #state{
 
         case WriteBuffer of
         w ->
-            {reply, ok, State#state{wfrag_cache = NewFragCache, size = Qsize + 1, wfrag_cache_size = NewFragCacheSize, wfrag_dirty = true}, 0};
+            {ok, State#state{wfrag_cache = NewFragCache, size = Qsize + 1, wfrag_cache_size = NewFragCacheSize, wfrag_dirty = true}};
 
         r ->
-            {reply, ok, State#state{rfrag_cache = NewFragCache, size = Qsize + 1, rfrag_cache_size = NewFragCacheSize, rfrag_dirty = true, meta_dirty = true}, 0}
+            {ok, State#state{rfrag_cache = NewFragCache, size = Qsize + 1, rfrag_cache_size = NewFragCacheSize, rfrag_dirty = true, meta_dirty = true}}
 
         end
 
+    end,
+
+    HasSubscibers = dict:size(ReplyState#state.subs_dict) > 0,
+
+    if HasSubscibers -> 
+        {reply, Reply, ReplyState, 0};
+    true ->
+        {reply, Reply, ReplyState}
     end;
 
 handle_call({deq, Fun, Args}, _, #state{ qname = QName, size = Qsize,
@@ -287,12 +297,7 @@ handle_call({deq, Fun, Args}, _, #state{ qname = QName, size = Qsize,
     end;
 
 handle_call(size, _, #state{size = Qsize} = State) ->
-
-    if (Qsize > 0) ->
-        {reply, Qsize, State, 0};
-    true ->
-        {reply, Qsize, State}
-    end;
+    {reply, Qsize, State};
 
 handle_call(stop, _, State) ->
 
@@ -305,18 +310,12 @@ handle_call(stop, _, State) ->
 
     end;
 
-handle_call(sync, _, #state{size = Qsize} = State) ->
-
+handle_call(sync, _, State) ->
 
     {Res, NewState} = do_sync(State),
 
-    if (Qsize > 0) ->
-        {reply, Res, NewState, 0};
-    true ->
-        {reply, Res, NewState}
+    {reply, Res, NewState};
         
-    end;
-
 handle_call(purge, _, #state{qname = QName, storage_mod = StorageMod, storage_mod_params = StorageModParams, rfrag_idx = RIdx, wfrag_idx = WIdx} = State) ->
 
     {Res, NewState} =
@@ -336,12 +335,12 @@ handle_call(purge, _, #state{qname = QName, storage_mod = StorageMod, storage_mo
 
     end,
 
-    {reply, Res, NewState, 0};
+    {reply, Res, NewState};
 
 handle_call(subscriber_count, _, #state{subs_dict = SDict} = State) ->
-    {reply, dict:size(SDict), State, 0};
+    {reply, dict:size(SDict), State};
 
-handle_call({subscribe, Pid}, _, #state{subs_dict = SDict, size = Qsize} = State) ->
+handle_call({subscribe, Pid}, _, #state{subs_dict = SDict} = State) ->
 
     NewSDict =
     case dict:find(Pid, SDict) of
@@ -355,16 +354,9 @@ handle_call({subscribe, Pid}, _, #state{subs_dict = SDict, size = Qsize} = State
 
     end,
 
-    if (Qsize > 0) ->
-   
-        {reply, ok, State#state{subs_dict = NewSDict}, 0};
+    {reply, ok, State#state{subs_dict = NewSDict}, 0};
 
-    true ->
-        {reply, ok, State#state{subs_dict = NewSDict}}
-
-    end;
-
-handle_call({unsubscribe, Pid}, _, #state{subs_dict = SDict, size = Qsize} = State) ->
+handle_call({unsubscribe, Pid}, _, #state{subs_dict = SDict} = State) ->
 
     NewSDict =
     case dict:find(Pid, SDict) of
@@ -378,11 +370,7 @@ handle_call({unsubscribe, Pid}, _, #state{subs_dict = SDict, size = Qsize} = Sta
         SDict
     end,
 
-    if (Qsize > 0) ->
-        {reply, ok, State#state{subs_dict = NewSDict}, 0};
-    true ->
-        {reply, ok, State#state{subs_dict = NewSDict}}
-    end;
+    {reply, ok, State#state{subs_dict = NewSDict}};
 
 handle_call(get_meta, _, State) ->
 
@@ -396,39 +384,41 @@ handle_call(get_meta, _, State) ->
 
             } = State,
 
-    {reply, {S, MD, RI, RR, RS, RC, RD, WI, WS, WC, WD, L}  , State, 0};
+    {reply, {S, MD, RI, RR, RS, RC, RD, WI, WS, WC, WD, L}, State};
 
 handle_call(_, _, State) ->
-    {noreply, State, 0}.
+    {noreply, State}.
 
 handle_cast(_, State) ->
-    {noreply, State, 0}.
+    {noreply, State}.
 
 handle_info({'DOWN', MonRef, process, Pid, _Info}, #state{subs_dict = SDict} = State) ->
 
     erlang:demonitor(MonRef),
 
-    {noreply, State#state{subs_dict = dict:erase(Pid, SDict)}, 0};
+    {noreply, State#state{subs_dict = dict:erase(Pid, SDict)}};
 
 handle_info(timeout, #state{qname = QName, size = Qsize, subs_dict = SDict} = State) ->
     
     if (Qsize > 0) ->
-        [Pid ! {nqueue, QName, ready} || {Pid, _} <- dict:to_list(SDict)];
+
+        [Pid ! {nqueue, QName, ready} || {Pid, _} <- dict:to_list(SDict)],
+
+        {noreply, State#state{last_broadcast = now()}};
 
     true ->
-        ok
+        {noreply, State}
 
-    end,
+    end;
 
-    {noreply, State, 10000};
 
 handle_info(_, State) ->
-    {noreply, State, 0}.
+    {noreply, State}.
 
 code_change(_, State, _) ->
     {ok, State}.
 
-terminate(_, _) -> ok.
+terminate(_, State) -> do_sync(State).
 
 do_sync(#state{ qname = QName, size = Qsize,
                 storage_mod = StorageMod, storage_mod_params = StorageModParams,

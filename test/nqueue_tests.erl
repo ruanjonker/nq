@@ -1,5 +1,7 @@
 -module(nqueue_tests).
 
+-include("nq_queue.hrl").
+
 -include_lib("eunit/include/eunit.hrl").
 
 setup_test() -> 
@@ -394,11 +396,14 @@ benchmark1_test() ->
 
 handle_test() ->
 
-    ?assertEqual({noreply, state, 0}, nqueue:handle_call(crap, dontcare, state)),
-    ?assertEqual({noreply, state, 0}, nqueue:handle_cast(crap, state)),
-    ?assertEqual({noreply, state, 0}, nqueue:handle_info(crap, state)),
+    ?assertEqual({noreply, state}, nqueue:handle_call(crap, dontcare, state)),
+    ?assertEqual({noreply, state}, nqueue:handle_cast(crap, state)),
+    ?assertEqual({noreply, state}, nqueue:handle_info(crap, state)),
     ?assertEqual({ok, state}, nqueue:code_change(dontcare, state, dontcare)),
-    ?assertEqual(ok, nqueue:terminate(dontcare, dontcare)).
+
+    StateIn = #state{meta_dirty = false, wfrag_dirty = false, rfrag_dirty = false},
+
+    ?assertEqual({ok, StateIn}, nqueue:terminate(dontcare, StateIn)).
 
 
 subscribe_test() ->
@@ -541,11 +546,23 @@ enq_deq_many_test_() ->
 
         ?assertEqual(0, nqueue:size("test")),
 
-        ?assertEqual(ok, nqueue:sync("test")),
+        ?assertEqual(ok, nqueue:purge("test")),
+
+        Meta = nqueue:get_meta("test"),
+
+        ?assertMatch({0, false, 0, 0, 0, [], false, 0, 0, [], false, {_,_,_}}, Meta),
 
         ?assertEqual(0, nqueue:size("test")),
 
         ?assertEqual(ok, enq_deq_many("test", "test message 12345", 10000)),
+
+        ?assertEqual(0, nqueue:size("test")),
+
+        ?assertMatch({0, true, 0, 0, 0, [], true, 0, 0, [], false, {_,_,_}}, nqueue:get_meta("test")),
+
+        ?assertEqual(ok, nqueue:sync("test")),
+
+        ?assertMatch({0, false, 0, 0, 0, [], false, 0, 0, [], false, {_,_,_}}, nqueue:get_meta("test")),
 
         ok
 
