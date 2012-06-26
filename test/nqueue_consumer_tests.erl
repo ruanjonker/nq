@@ -12,7 +12,7 @@ setup_test() ->
 
     ?assertEqual(ok, application:start(nq)),
 
-    ?assertMatch({ok, P} when is_pid(P), nqueue:start_link("test")),
+    ?assertMatch({ok, P} when is_pid(P), nqueue:start_link("test", [{storage_mod, nq_file}, {storage_mod_params, "./nqdata/"}, {max_frag_size, 4096 * 1000}])),
 
     ?assertEqual(0, nqueue:size("test")),
 
@@ -128,6 +128,8 @@ consume_err_err_fun_test_() ->
         ?assertEqual({bla, 'some error'}, M2)
     end,
 
+    ?assertEqual(unpaused, nqueue_consumer:get_state("test")),
+
     ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
 
     F1 = fun(_,M,A) -> A ! M, ok end,
@@ -172,6 +174,8 @@ receive_many_test_() ->
         ?assertEqual(ok, nqueue_consumer:set_state("test", unpaused)),
 
         ?assertEqual(ok, receive_many("this is a test message", 10000)),
+
+        ?assertEqual(unpaused, nqueue_consumer:get_state("test")),
 
         ?assertEqual(0, nqueue:size("test")),
 
