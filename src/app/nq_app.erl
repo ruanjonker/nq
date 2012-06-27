@@ -15,7 +15,7 @@ start(_Type, Args) ->
     {ok, S} when (is_integer(S) and (S > 0)) ->
         ok;
     _ ->
-        ok = application:set_env(nq, max_frag_size, 64000)
+        ok = application:set_env(nq, max_frag_size, 512000)
     end,
 
     case application:get_env(nq, sync_interval_ms) of
@@ -25,26 +25,19 @@ start(_Type, Args) ->
         ok = application:set_env(nq, sync_interval_ms, 5000)
     end,
 
-    case application:get_env(nq, subs_notification_sleep_ms) of
-    {ok, SubsNotificationSleepMs} when (is_integer(SubsNotificationSleepMs) and (SubsNotificationSleepMs > 0)) ->
-        ok;
-    _ ->
-        ok = application:set_env(nq, subs_notification_sleep_ms, 1000)
-    end,
-
-    %{"./nqdata/consumer_cache/", 16, 1, 4096, 5000}
+    %{"./nqdata/nq_consumer_cache/", 16, 1, 4096, 5000}
     case application:get_env(nq, consumer_cache_cfg) of
     {ok, {_, _, _, _, _}} -> 
         ok;
     _ ->
-        ok = application:set_env(nq, consumer_cache_cfg, {"./nqdata/consumer_cache/", 16, 1, 4096, 5000})
+        ok = application:set_env(nq, consumer_cache_cfg, {"./nqdata/nq_consumer_cache/", 16, 1, 4096, 5000})
     end,
 
     'nq_sup':start_link(Args).
 
 prep_stop(State) ->
 
-    ok = bdb_store:sync("consumer_cache"),
+    ok = bdb_store:sync("nq_consumer_cache"),
 
     State.
 

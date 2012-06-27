@@ -16,8 +16,6 @@ setup_test() ->
 
     ?assertEqual(ok, application:set_env(nq, sync_interval_ms, 5000)),
 
-    ?assertEqual(ok, application:set_env(nq, subs_notification_sleep_ms, 1000)),
-
     ?assertEqual(ok, application:start(nq)).
 
 
