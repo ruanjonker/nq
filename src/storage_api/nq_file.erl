@@ -13,11 +13,11 @@
         write_meta/6
         ]).
 
-init(_QName, BaseDir) ->
+init(QName, BaseDir) ->
 
-    ok = filelib:ensure_dir(BaseDir ++ "/"),
+    ok = filelib:ensure_dir(BaseDir ++ "/" ++ QName ++ "/"),
 
-    {ok, BaseDir}.
+    {ok, BaseDir ++ "/" ++ QName ++ "/"}.
 
 read_frag(QName, FragIdx, BaseDir) ->
 
