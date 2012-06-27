@@ -150,7 +150,7 @@ handle_call({enq, Msg}, _, #state{
                                 qname = QName, size = Qsize,
                                 storage_mod = StorageMod, storage_mod_params = StorageModParams,
                                 rfrag_cache = RData, rfrag_idx = RFragIdx, rfrag_cache_size = RFragCacheSize, rfrag_recno = RFragRecNo,
-                                wfrag_cache = WData, wfrag_idx = WFragIdx, wfrag_cache_size = WFragCacheSize} = State) ->
+                                wfrag_cache = WData, wfrag_idx = WFragIdx, wfrag_cache_size = WFragCacheSize, max_frag_size = MaxFragCacheSize} = State) ->
 
     BinMsg = term_to_binary(Msg),
 
@@ -167,8 +167,6 @@ handle_call({enq, Msg}, _, #state{
     NewFragCacheSize = 8 + Size + FragCacheSize,
 
     NewFragCache = lists:append(FragCache, [<<Size:64/big-unsigned-integer,BinMsg/binary>>]),
-
-    {ok, MaxFragCacheSize} = application:get_env(nq, max_frag_size),
 
     {Reply, ReplyState} = 
     if (NewFragCacheSize >= MaxFragCacheSize) ->

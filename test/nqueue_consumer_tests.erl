@@ -16,7 +16,7 @@ setup_test() ->
 
     ?assertEqual(0, nqueue:size("test")),
 
-    ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
+    ?assertEqual({ok, 0}, bdb_store:count("nq_consumer_cache")),
 
 %    error_logger:tty(true),
 
@@ -25,7 +25,7 @@ setup_test() ->
 
 start_link_test() ->
 
-    F = fun(_Q,M,A) -> {ok, S} =  bdb_store:count("consumer_cache"),  A ! {M, S}, ok end,
+    F = fun(_Q,M,A) -> {ok, S} =  bdb_store:count("nq_consumer_cache"),  A ! {M, S}, ok end,
 
     Fe = fun(_Q,_M,_E,_A) -> ok end,
 
@@ -47,7 +47,7 @@ consume_1_test() ->
 
     ?assertEqual(unpaused, nqueue_consumer:get_state("test")),
 
-    ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
+    ?assertEqual({ok, 0}, bdb_store:count("nq_consumer_cache")),
     ?assertEqual(0, nqueue:size("test")),
 
     ok.
@@ -101,11 +101,11 @@ consume_err_err_fun_test_() ->
     ?assertEqual(ok, nqueue_consumer:set_state("test", paused)),
 
     ?assertEqual(0, nqueue:size("test")),
-    ?assertEqual({ok, 1}, bdb_store:count("consumer_cache")),
+    ?assertEqual({ok, 1}, bdb_store:count("nq_consumer_cache")),
     
     P1 = global:whereis_name({nqueue_consumer, "test"}),
 
-    ?assertMatch({ok, {"test", bla, {_,_,_}, C}} when (C >= 1), ?dbget("consumer_cache", P1)),
+    ?assertMatch({ok, {"test", bla, {_,_,_}, C}} when (C >= 1), ?dbget("nq_consumer_cache", P1)),
 
     ?assertEqual(ok, nqueue_consumer:set_state("test", unpaused)),
 
@@ -115,8 +115,8 @@ consume_err_err_fun_test_() ->
 
     ?assertEqual(ok, nqueue_consumer:set_state("test", paused)),
 
-    ?assertMatch({ok, {"test", bla, {_,_,_}, C}} when (C >= 2), ?dbget("consumer_cache", P1)),
-    ?assertEqual({ok, 1}, bdb_store:count("consumer_cache")),
+    ?assertMatch({ok, {"test", bla, {_,_,_}, C}} when (C >= 2), ?dbget("nq_consumer_cache", P1)),
+    ?assertEqual({ok, 1}, bdb_store:count("nq_consumer_cache")),
 
     Fe2 = fun(_,M,E, A) -> A ! {M, E}, ok end,
 
@@ -130,7 +130,7 @@ consume_err_err_fun_test_() ->
 
     ?assertEqual(unpaused, nqueue_consumer:get_state("test")),
 
-    ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
+    ?assertEqual({ok, 0}, bdb_store:count("nq_consumer_cache")),
 
     F1 = fun(_,M,A) -> A ! M, ok end,
     Fe3 = fun(_,_,_,_) -> ok end,
@@ -147,7 +147,7 @@ consume_err_err_fun_test_() ->
 
     ?assertEqual(unpaused, nqueue_consumer:get_state("test")),
 
-    ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
+    ?assertEqual({ok, 0}, bdb_store:count("nq_consumer_cache")),
 
     ok
 
@@ -160,7 +160,7 @@ receive_many_test_() ->
         ?assertEqual(ok, nqueue_consumer:set_state("test", paused)),
         ?assertEqual(paused, nqueue_consumer:get_state("test")),
         ?assertEqual(0, nqueue:size("test")),
-        ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
+        ?assertEqual({ok, 0}, bdb_store:count("nq_consumer_cache")),
 
 
         ?assertEqual(ok, enqueue_many("test", "this is a test message", 10000)),
@@ -179,7 +179,7 @@ receive_many_test_() ->
 
         ?assertEqual(0, nqueue:size("test")),
 
-        ?assertEqual({ok, 0}, bdb_store:count("consumer_cache")),
+        ?assertEqual({ok, 0}, bdb_store:count("nq_consumer_cache")),
 
         ok
 

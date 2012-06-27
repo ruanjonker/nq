@@ -80,14 +80,14 @@ handle_info(timeout, #state{queue = Queue, proc_fun = Fun, proc_args = Args, err
     Acquisition = 
 
     %See if there is something in the cache already
-    case ?dbget("consumer_cache", Self) of
+    case ?dbget("nq_consumer_cache", Self) of
     {ok, {_, CachedMsg, Ts, Count}} ->
         {ok, CachedMsg, Ts, Count};
         
     {error, not_found} ->
 
         CacheFun = fun(Q, M, _) ->
-            ok = ?dbset("consumer_cache", Self, {Q, M, T0, 0}) 
+            ok = ?dbset("nq_consumer_cache", Self, {Q, M, T0, 0}) 
         end,
 
         case nqueue:deq(Queue, CacheFun, undefined) of
@@ -123,7 +123,7 @@ handle_info(timeout, #state{queue = Queue, proc_fun = Fun, proc_args = Args, err
             case catch(Fun(Queue, Message, Args)) of
             ok ->
     
-                ok = ?dbdel("consumer_cache", Self),
+                ok = ?dbdel("nq_consumer_cache", Self),
     
                 {noreply, State, 0};
     
@@ -131,11 +131,11 @@ handle_info(timeout, #state{queue = Queue, proc_fun = Fun, proc_args = Args, err
             
                 case catch (ErrFun(Queue, Message, DeqError, ErrArgs)) of
                 ok ->
-                    ok = ?dbdel("consumer_cache", Self);
+                    ok = ?dbdel("nq_consumer_cache", Self);
     
                 ErrFunError ->
     
-                    ok = ?dbset("consumer_cache", Self, {Queue, Message, ProcTs, ProcCount + 1}),                
+                    ok = ?dbset("nq_consumer_cache", Self, {Queue, Message, ProcTs, ProcCount + 1}),                
     
                     error_logger:error_msg("Call to ~p(~p,~p,~p,~p) to handle message handling error (~p) failed with ~p~n", [ErrFun, Queue, Message, DeqError, ErrArgs, DeqError, ErrFunError])
     

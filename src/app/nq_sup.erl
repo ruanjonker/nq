@@ -22,7 +22,7 @@ init([_Args]) ->
     ConsCacheOptions = [{txn_enabled, true}, {db_type, btree}, {cache_size, trunc(CacheSizeMB * 1024 * 1024)}, {buffer_size, trunc(BufferSizeMB * 1024 * 1024)}, {page_size, PageSizeB}, {sync, SyncIntervalMs, SyncFun}],
 
     ConsumerCache = {consumer_cache,
-                        {bdb_store, start_link, ["consumer_cache", BaseDir, ConsCacheOptions]},
+                        {bdb_store, start_link, ["nq_consumer_cache", BaseDir, ConsCacheOptions]},
                         permanent, 60000, worker, [bdb_store]},
 
     {ok, { RestartSpec, [
