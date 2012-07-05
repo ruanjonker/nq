@@ -159,6 +159,13 @@ receive_many_test_() ->
 
         ?assertEqual(ok, nqueue_consumer:set_state("test", paused)),
         ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+        ?assertEqual(ok, nqueue_consumer:unpause("test")),
+        ?assertEqual(unpaused, nqueue_consumer:get_state("test")),
+
+        ?assertEqual(ok, nqueue_consumer:pause("test")),
+        ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
         ?assertEqual(0, nqueue:size("test")),
         ?assertEqual({ok, 0}, bdb_store:count("nq_consumer_cache")),
 
@@ -184,6 +191,100 @@ receive_many_test_() ->
         ok
 
     end]}.
+
+process_n_test_() ->
+
+    {timeout, 30000, [ fun() ->
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ?assertEqual({ok, 0}, bdb_store:count("nq_consumer_cache")),
+
+    ?assertEqual(ok, nqueue_consumer:pause("test")),
+
+    ?assertEqual(ok, enqueue_many("test", "this is a test message", 100)),
+
+    F1 = fun(_,M,A) -> A ! M, ok end,
+
+    ?assertEqual(ok, nqueue_consumer:set_fun("test", F1, self())),
+ 
+    ?assertEqual(ok, nqueue_consumer:process_n("test", 5)),
+
+    ?assertEqual(ok, receive_many("this is a test message", 5)),
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ?assertEqual(95, nqueue:size("test")),
+
+    ?assertEqual(ok, nqueue_consumer:process_n("test", 55)),
+
+    ?assertEqual(ok, receive_many("this is a test message", 55)),
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ?assertEqual(40, nqueue:size("test")),
+
+    F2 = fun(_,M,A) -> timer:sleep(1000), A ! M, ok end,
+
+    ?assertEqual(ok, nqueue_consumer:set_fun("test", F2, self())),
+
+    ?assertEqual(ok, nqueue_consumer:process_n("test", 10)),
+
+    ?assertEqual(ok, nqueue_consumer:pause("test")),
+
+    ?assertEqual(ok, receive_many("this is a test message", 1)),
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ?assertEqual(39, nqueue:size("test")),
+
+    ?assertEqual(ok, nqueue_consumer:set_fun("test", F1, self())),
+
+    ?assertEqual(ok, nqueue_consumer:process_n("test", all)),
+
+    ?assertEqual(ok, receive_many("this is a test message", 39)),
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ?assertEqual(ok, nqueue_consumer:process_n("test", 100)),
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ?assertEqual(ok, enqueue_many("test", "this is a test message", 100)),
+
+    F3 = fun(_,M,A) -> timer:sleep(1), A ! M, ok end,
+
+    ?assertEqual(ok, nqueue_consumer:set_fun("test", F3, self())),
+ 
+    ?assertEqual(ok, nqueue_consumer:process_n("test", all)),
+
+    ?assertEqual({ok, "this is a test message"}, nqueue:deq("test")),
+
+    ?assertEqual(ok, receive_many("this is a test message", 99)),
+
+    ?assertEqual(ok, nqueue_consumer:set_fun("test", F1, self())),
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ok
+
+    end]}.
+
+handle_info_queue_ready_notification_test() ->
+
+    P1 = global:whereis_name({nqueue_consumer, "test"}),
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    P1 ! {nqueue, "test", ready},
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ok.
 
 teardown_test() ->
 

@@ -96,7 +96,7 @@ set_state(ConsId, S) when ((S == paused) or (S == unpaused)) ->
 %% <b>3.</b> The queue is empty
 %% 
 -spec process_n(string(), pos_integer()) -> ok.
-process_n(ConsId, N) when ((is_integer(N) and N > 0) or (N =:= all)) ->
+process_n(ConsId, N) when ((is_integer(N) and (N > 0))  or (N =:= all)) ->
     gen_server:call(?NAME(ConsId), {process_n, N}, infinity).
 
 %% @hidden
@@ -137,7 +137,7 @@ handle_call({process_n, N}, _, #state{queue = Queue} = State) ->
         %Unsubscribe from queue, we are actively going to process it
         ok = nqueue:unsubscribe(Queue),
 
-        {reply, ok, State#state{proc_state = unpaused, messages_to_go = NumMsgs + 1, is_subscribed = false}, 0};
+        {reply, ok, State#state{proc_state = unpaused, messages_to_go = NumMsgs, is_subscribed = false}, 0};
 
     true ->
         %Nothing to do ...
