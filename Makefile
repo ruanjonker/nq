@@ -1,5 +1,8 @@
 
-.PHONY: all app clean test deps release
+.PHONY: all app clean test deps release docs
+
+all: clean app test docs
+	@echo "Done."
 
 ./ebin/nq.app: src/*/*.erl include/*.hrl test/*.erl
 	./rebar compile
@@ -21,6 +24,8 @@ deb: release ./package/deb/*.template ./package/deb/godeb.sh
 	cp ./rel/nq.tar.gz ./package/deb/.
 	cd ./package/deb; ./godeb.sh
 
+docs:
+	./rebar doc
 
 clean:
 	rm -f rel/nq.tar.gz
@@ -38,5 +43,4 @@ test: app
 	mkdir -p .eunit
 	./rebar skip_deps=true eunit
 
-all: clean app test
-	@echo "Done."
+

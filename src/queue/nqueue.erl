@@ -37,23 +37,74 @@
 
         ]).
 
+
+-type queue_name() :: string().
+-type message() :: any().
+-type error() :: any().
+-type option() :: {storage_mod, module()} | {storage_mod_params, any()} | {sync_interval_ms, pos_integer()} | {max_frag_size, pos_integer()}.
+-type options() :: list(option()).
+-type proc_args() :: any().
+-type proc_fun() :: fun((queue_name(),message(), proc_args()) -> ok).
+-type queue_size() :: non_neg_integer().
+-type meta_dirty() :: boolean().
+-type read_frag_index() :: non_neg_integer().
+-type read_frag_recno() :: non_neg_integer().
+-type read_frag_size() :: non_neg_integer().
+-type read_frag() :: list(binary()).
+-type read_frag_dirty() :: boolean().
+-type write_frag_index() :: non_neg_integer().
+-type write_frag_size() :: non_neg_integer().
+-type write_frag() :: list(binary()).
+-type write_frag_dirty() :: boolean().
+-type last_sync() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
+
+-type ready_notification() :: {nqueue, queue_name(), ready}.
+
+-type meta() :: {queue_size(), meta_dirty(), read_frag_index(), read_frag_recno(), read_frag_size(), read_frag(), read_frag_dirty(), write_frag_index(), write_frag_size(), write_frag(), write_frag_dirty(), last_sync()}.
+
+
 -define(NAME(X), {global, {?MODULE, X}}).
 
+
+%% @doc Wrapper for start_link(queue_name(), options()).
+%%
+-spec start_link(queue_name()) -> {ok, pid()}.
 start_link(QName) when is_list(QName) ->
     start_link(QName, [{storage_mod, nq_file}, {storage_mod_params, "./nqdata/"}]).
 
+%% @doc Starts and links a queue.<br/>
+%% Use this to start your queue in a supervisory tree
+%%
+-spec start_link(queue_name(), options()) -> {ok, pid()}.
 start_link(QName, Options)->
     gen_server:start_link(?NAME(QName), ?MODULE, [QName, Options], []).
 
+%% @doc Enqueue a message.<br/>
+%% Insert a message at the back of the queue.
+%%
+-spec enq(queue_name(), message()) -> ok | error().
 enq(QName, Msg) ->
     gen_server:call(?NAME(QName), {enq, Msg}, infinity).
 
+%% @doc Dequeue a message.<br/>
+%% Remove a message from the front of the queue.
+%%
+-spec deq(queue_name()) -> {ok, message()} | {error, empty} | error().
 deq(QName) ->
     deq(QName, undefined, undefined).
 
+%% @doc Dequeue a message with a fun.<br/>
+%% Remove a message from the front of the queue by evaluating proc_fun().<br/>
+%% The message is removed from the queue only if proc_fun() returns ok.<br/><br/>
+%% <b>NOTE:</b>The queue will block while proc_fun() is called.
+%%
+-spec deq(queue_name(), proc_fun(), proc_args()) -> {ok, message()} | {error, empty} | error().
 deq(QName, Fun, Args) when is_function(Fun, 3) or ((Fun == undefined) and (Args == undefined)) ->
     gen_server:call(?NAME(QName), {deq, Fun, Args}, infinity).
 
+%% @doc Peek at front of queue<br/>
+%% Look at the message at the fron of the queue.
+-spec peek(queue_name()) -> {ok, message()} | {error, empty} | error().
 peek(QName) ->
 
     case deq(QName, fun (_, M, _) -> {peek, M} end, undefined) of
@@ -65,32 +116,53 @@ peek(QName) ->
 
     end.
 
+%% @doc Clear the queue.<br/>
+%% This will remove all messages from the queue.
+-spec purge(queue_name()) -> ok | error().
 purge(QName) ->
     gen_server:call(?NAME(QName), purge, infinity).
 
+%% @doc Retrun the queue's meta information.<br/>
+%% This is mainly used for debugging / integrating new storage mods.
+-spec get_meta(queue_name()) -> {ok, meta()}.
 get_meta(QName) ->
     gen_server:call(?NAME(QName), get_meta, infinity).
 
-
+%% @doc Sync cache and meta.<br/>
+-spec sync(queue_name()) -> ok | error().
 sync(QName) ->
     gen_server:call(?NAME(QName), sync, infinity).
 
+%% @doc Return the queue's size, i.e. how many messages<br/>
+-spec size(queue_name()) -> queue_size().
 size(QName) ->
     gen_server:call(?NAME(QName), size, infinity).
 
+%% @hidden
+-spec stop(queue_name()) -> ok.
 stop(QName) ->
     gen_server:call(?NAME(QName), stop, infinity).
 
+%% @doc Subscribe for events.<br/><br/>
+%% The calling process will be subscribed to receiving notifications on the queue.<br/><br/>
+%% Notifications will be sent from the queue in the following fashion:<br/><br/> pid() ! ready_notification() 
+-spec subscribe(queue_name()) -> ok.
 subscribe(QName) ->
     gen_server:call(?NAME(QName), {subscribe, self()}, infinity).
-    
+
+%% @doc Unsubscribe for events.<br/><br/>
+%% The calling process will be unsubscribed from receiving notifications on the queue.<br/>
+-spec unsubscribe(queue_name()) -> ok.
 unsubscribe(QName) ->
     gen_server:call(?NAME(QName), {unsubscribe, self()}, infinity).
 
+%% @doc Return the number of subscribers on the queue.<br/><br/>
+-spec subscriber_count(queue_name()) -> non_neg_integer().
 subscriber_count(QName) ->
     gen_server:call(?NAME(QName), subscriber_count, infinity).
 
 
+%% @hidden
 init([QName, Options]) ->
 
     process_flag(trap_exit, true),
@@ -146,6 +218,7 @@ init([QName, Options]) ->
                 wfrag_cache = WData, wfrag_idx = WFragIdx, storage_mod = StorageMod, storage_mod_params = UpdatedStorageModParams, max_frag_size = MaxFragSize, auto_sync = AutoSync}}.
 
 
+%% @hidden
 handle_call({enq, Msg}, _, #state{  
                                 qname = QName, size = Qsize,
                                 storage_mod = StorageMod, storage_mod_params = StorageModParams,
@@ -387,9 +460,11 @@ handle_call(get_meta, _, State) ->
 handle_call(_, _, State) ->
     {noreply, State}.
 
+%% @hidden
 handle_cast(_, State) ->
     {noreply, State}.
 
+%% @hidden
 handle_info({'DOWN', MonRef, process, Pid, _Info}, #state{subs_dict = SDict} = State) ->
 
     erlang:demonitor(MonRef),
@@ -413,11 +488,14 @@ handle_info(timeout, #state{qname = QName, size = Qsize, subs_dict = SDict} = St
 handle_info(_, State) ->
     {noreply, State}.
 
+%% @hidden
 code_change(_, State, _) ->
     {ok, State}.
 
+%% @hidden
 terminate(_, State) -> do_sync(State).
 
+%% @hidden
 do_sync(#state{ qname = QName, size = Qsize,
                 storage_mod = StorageMod, storage_mod_params = StorageModParams,
                 meta_dirty = MDirty, wfrag_dirty = WDirty, rfrag_dirty = RDirty, rfrag_recno = RFragRecNo, rfrag_idx = RFragIdx, wfrag_idx = WFragIdx, wfrag_cache = WData, rfrag_cache = RData} = State) ->
@@ -463,6 +541,7 @@ do_sync(#state{ qname = QName, size = Qsize,
 
     end.
 
+%% @hidden
 parse_frag(<<MsgSize:64/big-unsigned-integer,Rest/binary>>, MsgList, MsgIdx, RecNo) -> 
 
     if (MsgIdx < RecNo) ->
@@ -481,6 +560,7 @@ parse_frag(<<MsgSize:64/big-unsigned-integer,Rest/binary>>, MsgList, MsgIdx, Rec
 parse_frag(<<>>, MsgList, _, _) -> {ok, MsgList}.
 
 
+%% @hidden
 read_frag(QName, FragIdx, RecNo, StorageMod, StorageModParams) ->
 
     case catch(StorageMod:read_frag(QName, FragIdx, StorageModParams)) of
@@ -492,6 +572,7 @@ read_frag(QName, FragIdx, RecNo, StorageMod, StorageModParams) ->
 
     end.
 
+%% @hidden
 do_deq(_, BinMessage, undefined, _, NewStateSuccess, _) -> {reply, {ok, binary_to_term(BinMessage)}, NewStateSuccess};
 do_deq(QName, BinMessage, Fun, Args, NewStateSuccess, NewStateFail) ->
 
@@ -504,6 +585,7 @@ do_deq(QName, BinMessage, Fun, Args, NewStateSuccess, NewStateFail) ->
         {reply, {error, Error}, NewStateFail}
     end.
  
+%% @hidden
 read_next_frag_for_deq(QName, Qsize, RIdx, WIdx, StorageMod, StorageModParams) ->
 
     case read_frag(QName, RIdx + 1, 0, StorageMod, StorageModParams) of
