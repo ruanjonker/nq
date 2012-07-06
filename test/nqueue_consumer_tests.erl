@@ -105,7 +105,7 @@ consume_err_err_fun_test_() ->
     
     P1 = global:whereis_name({nqueue_consumer, "test"}),
 
-    ?assertMatch({ok, {"test", bla, {_,_,_}, C}} when (C >= 1), ?dbget("nq_consumer_cache", P1)),
+    ?assertMatch({ok, {"test", bla, {_,_,_}, C, 5000}} when (C >= 1), ?dbget("nq_consumer_cache", P1)),
 
     ?assertEqual(ok, nqueue_consumer:set_state("test", unpaused)),
 
@@ -115,7 +115,7 @@ consume_err_err_fun_test_() ->
 
     ?assertEqual(ok, nqueue_consumer:set_state("test", paused)),
 
-    ?assertMatch({ok, {"test", bla, {_,_,_}, C}} when (C >= 2), ?dbget("nq_consumer_cache", P1)),
+    ?assertMatch({ok, {"test", bla, {_,_,_}, C, 5000}} when (C >= 2), ?dbget("nq_consumer_cache", P1)),
     ?assertEqual({ok, 1}, bdb_store:count("nq_consumer_cache")),
 
     Fe2 = fun(_,M,E, A) -> A ! {M, E}, ok end,
@@ -168,7 +168,6 @@ receive_many_test_() ->
 
         ?assertEqual(0, nqueue:size("test")),
         ?assertEqual({ok, 0}, bdb_store:count("nq_consumer_cache")),
-
 
         ?assertEqual(ok, enqueue_many("test", "this is a test message", 10000)),
 
@@ -273,6 +272,84 @@ process_n_test_() ->
     ok
 
     end]}.
+
+consumer_proc_fun_test_() ->
+
+    {timeout, 5000, [fun() ->
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ?assertEqual(ok, enqueue_many("test", "this is a test message", 2)),
+
+    F3 = fun(_,M,A) -> A ! {now(), M}, {ok, 1000, A} end,
+
+    ?assertEqual(ok, nqueue_consumer:set_fun("test", F3, self())),
+ 
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ?assertEqual(ok, nqueue_consumer:unpause("test")),
+
+    receive {T0, M0} ->
+        ?assertEqual(M0, "this is a test message")
+
+    end,
+
+    receive {T1, M1} ->
+        ?assertEqual(M1, "this is a test message")
+
+    end,
+
+    DiffMs = timer:now_diff(T1, T0)/1000,
+
+    ?assert(DiffMs >= 1000),
+
+    ?assertEqual(ok, nqueue_consumer:pause("test")),
+
+    ok
+
+    end]}.
+
+consumer_proc_fun_retry_test_() ->
+
+    {timeout, 5000, [fun() ->
+
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    ?assertEqual(ok, enqueue_many("test", "this is a test message", 2)),
+
+    F3 = fun(_,M, {A, C}) -> if (C >= 1) ->  A ! {now(), M, C}, {ok, 0, {A, 0}}; true -> {retry, 1000, {A, C + 1}} end end,
+
+    ?assertEqual(ok, nqueue_consumer:set_fun("test", F3, {self(), 0})),
+ 
+    ?assertEqual(paused, nqueue_consumer:get_state("test")),
+
+    T0 = now(),
+    ?assertEqual(ok, nqueue_consumer:unpause("test")),
+
+    receive {T1, M0, 1} ->
+        ?assertEqual(M0, "this is a test message")
+
+    end,
+
+    ?assert((timer:now_diff(T1, T0)/1000) > 1000),
+
+    receive {T2, M1, 1} ->
+        ?assertEqual(M1, "this is a test message")
+
+    end,
+
+    DiffMs = timer:now_diff(T2, T0)/1000,
+
+    ?assert(DiffMs > 2000),
+
+    ?assertEqual(ok, nqueue_consumer:pause("test")),
+
+    ?assertEqual(0, nqueue:size("test")),
+
+    ok
+
+    end]}.
+
 
 handle_info_queue_ready_notification_test() ->
 
