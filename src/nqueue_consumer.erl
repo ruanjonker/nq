@@ -31,7 +31,7 @@
 -type proc_fun() :: fun((queue_name(),message(), proc_args()) -> ok | {ok, sleep_ms(), proc_args()} | {retry, sleep_ms(), proc_args()}).
 -type err_fun() :: fun((queue_name(),message(), proc_error(), err_args()) -> ok).
 
--record(state, {queue, proc_fun, proc_args, err_fun, err_args, proc_state = paused, messages_to_go = 0, is_subscribed = false}).
+-record(state, {queue, proc_fun, proc_args, err_fun, err_args, proc_state = paused, messages_to_go = 0, is_subscribed = false, app_session_id = undefined}).
 
 -define(NAME(X), {global, {?MODULE, X}}).
 
@@ -112,7 +112,9 @@ init([Queue, Fun, Args, ErrFun, ErrArgs, ProcState]) ->
 
     end,
 
-    {ok, #state{queue = Queue, proc_fun = Fun, proc_args = Args, err_fun = ErrFun, err_args = ErrArgs, proc_state = ProcState, is_subscribed = IsSubscribed}}.
+    {ok, AppSessionId} = application:get_env(nq, session),
+
+    {ok, #state{queue = Queue, proc_fun = Fun, proc_args = Args, err_fun = ErrFun, err_args = ErrArgs, proc_state = ProcState, is_subscribed = IsSubscribed, app_session_id = AppSessionId}}.
 
 
 %% @hidden
@@ -165,7 +167,7 @@ handle_cast(_, State) ->
     {noreply, State, 0}.
 
 %% @hidden
-handle_info(timeout, #state{queue = Queue, proc_fun = Fun, proc_args = Args, err_fun = ErrFun, err_args = ErrArgs, proc_state = unpaused, messages_to_go = MsgsToGo} = State) ->
+handle_info(timeout, #state{queue = Queue, proc_fun = Fun, proc_args = Args, err_fun = ErrFun, err_args = ErrArgs, proc_state = unpaused, messages_to_go = MsgsToGo, app_session_id = AppSessionId} = State) ->
 
     T0 = now(),
     Self = self(),
@@ -174,7 +176,7 @@ handle_info(timeout, #state{queue = Queue, proc_fun = Fun, proc_args = Args, err
     ErrRetryIntervalMs   = 5000,
     MaxMessageDelayAgeMs = 5 * 60 * 1000, %Upper limit for message delays, to prevent things from accidentally locking up.
 
-    Acquisition = aqcuire_message(Self, T0, Queue),
+    Acquisition = aqcuire_message(Self, AppSessionId, T0, Queue),
 
     case Acquisition of
     {ok, Message, ProcTs, ProcCount, MessageDelayMs} ->
@@ -190,16 +192,16 @@ handle_info(timeout, #state{queue = Queue, proc_fun = Fun, proc_args = Args, err
 
             case catch(Fun(Queue, Message, Args)) of
             ok ->
-                proc_fun_ok(0, Args, Self, MsgsToGo, State);
+                proc_fun_ok(0, Args, Self, AppSessionId, MsgsToGo, State);
 
             {ok, ProcSleepTimeMs, NewArgs} ->
-                proc_fun_ok(ProcSleepTimeMs, NewArgs, Self, MsgsToGo, State);
+                proc_fun_ok(ProcSleepTimeMs, NewArgs, Self, AppSessionId, MsgsToGo, State);
 
             {retry, RetrySleepTimeMs, NewArgs} ->
-                proc_fun_retry(RetrySleepTimeMs, NewArgs, State, ProcCount, Queue, Message, Self);
+                proc_fun_retry(RetrySleepTimeMs, NewArgs, State, ProcCount, Queue, Message, Self, AppSessionId);
 
             DeqError ->
-                proc_fun_error(ErrFun, Queue, Message, DeqError, ErrArgs, Self, ErrRetryIntervalMs, State, ProcCount)
+                proc_fun_error(ErrFun, Queue, Message, DeqError, ErrArgs, Self, AppSessionId, ErrRetryIntervalMs, State, ProcCount)
     
             end
 
@@ -243,17 +245,17 @@ code_change(_, State, _) ->
     {ok, State}.
 
 %% @hidden
-aqcuire_message(Self, T0, Queue) ->
+aqcuire_message(Self, AppSessionId, T0, Queue) ->
 
     %See if there is something in the cache already
-    case ?dbget("nq_consumer_cache", Self) of
+    case ?dbget("nq_consumer_cache", {Self, AppSessionId}) of
     {ok, {_, CachedMsg, Ts, Count, SleepTimeMs}} ->
         {ok, CachedMsg, Ts, Count, SleepTimeMs};
 
     {error, not_found} ->
 
         CacheFun = fun(Q, M, _) ->
-            ok = ?dbset("nq_consumer_cache", Self, {Q, M, T0, 0, 0})
+            ok = ?dbset("nq_consumer_cache", {Self, AppSessionId},  {Q, M, T0, 0, 0})
         end,
 
         case nqueue:deq(Queue, CacheFun, undefined) of
@@ -268,9 +270,9 @@ aqcuire_message(Self, T0, Queue) ->
     end.
 
 %% @hidden
-proc_fun_ok(SleepTimeMs, NewProcArgs, Self, MsgsToGo, State) ->
+proc_fun_ok(SleepTimeMs, NewProcArgs, Self, AppSessionId, MsgsToGo, State) ->
 
-    ok = ?dbdel("nq_consumer_cache", Self),
+    ok = ?dbdel("nq_consumer_cache", {Self, AppSessionId}),
     
     if (MsgsToGo > 0) ->
 
@@ -289,23 +291,24 @@ proc_fun_ok(SleepTimeMs, NewProcArgs, Self, MsgsToGo, State) ->
         {noreply, State#state{proc_args = NewProcArgs}, SleepTimeMs}
     end.
 
-proc_fun_retry(SleepTimeMs, NewProcArgs, State, ProcCount, Queue, Message, Self) ->
+proc_fun_retry(SleepTimeMs, NewProcArgs, State, ProcCount, Queue, Message, Self, AppSessionId) ->
 
-    ok = ?dbset("nq_consumer_cache", Self, {Queue, Message, now(), ProcCount + 1, SleepTimeMs}),
+    ok = ?dbset("nq_consumer_cache", {Self, AppSessionId}, {Queue, Message, now(), ProcCount + 1, SleepTimeMs}),
 
     {noreply, State#state{proc_args = NewProcArgs}, SleepTimeMs}.
 
-proc_fun_error(ErrFun, Queue, Message, DeqError, ErrArgs, Self, ErrRetryIntervalMs, State, ProcCount) ->
+proc_fun_error(ErrFun, Queue, Message, DeqError, ErrArgs, Self, AppSessionId, ErrRetryIntervalMs, State, ProcCount) ->
 
     case catch (ErrFun(Queue, Message, DeqError, ErrArgs)) of
     ok ->
-        ok = ?dbdel("nq_consumer_cache", Self);
+        ok = ?dbdel("nq_consumer_cache", {Self, AppSessionId});
 
     ErrFunError ->
 
-        ok = ?dbset("nq_consumer_cache", Self, {Queue, Message, now(), ProcCount + 1, ErrRetryIntervalMs}),
+        ok = ?dbset("nq_consumer_cache", {Self, AppSessionId}, {Queue, Message, now(), ProcCount + 1, ErrRetryIntervalMs}),
 
-        error_logger:error_msg("Call to ~p(~p,~p,~p,~p) to handle message handling error (~p) failed with ~p~n", [ErrFun, Queue, Message, DeqError, ErrArgs, DeqError, ErrFunError])
+        error_logger:error_msg("Call to ~p(~p,~p,~p,~p) to handle message handling error (~p) failed with ~p", [ErrFun, Queue, Message, DeqError, ErrArgs, DeqError, ErrFunError])
+ %       error_logger:error_msg("~p~n", [ErrFunError])
 
     end,
 

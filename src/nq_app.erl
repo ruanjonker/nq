@@ -33,6 +33,8 @@ start(_Type, Args) ->
         ok = application:set_env(nq, consumer_cache_cfg, {"./nqdata/nq_consumer_cache/", 16, 1, 4096, 5000})
     end,
 
+    ok = application:set_env(nq, session, now()),
+
     'nq_sup':start_link(Args).
 
 prep_stop(State) ->

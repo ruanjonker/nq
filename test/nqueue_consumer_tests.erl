@@ -84,7 +84,11 @@ consume_err_test() ->
 
 consume_err_err_fun_test_() ->
 
-    {timeout, 10000, [fun() ->
+    {timeout, 20, [fun() ->
+
+    ?assertMatch({ok, {Mega,Secs,Micro}} when is_integer(Mega) and is_integer(Secs) and is_integer(Micro), application:get_env(nq, session)),
+
+    {ok, AppSessionId} = application:get_env(nq, session),
 
     Fe = fun(_,M,E, A) -> A ! {M, E}, error end,
 
@@ -93,6 +97,7 @@ consume_err_err_fun_test_() ->
     ?assertEqual(0, nqueue:size("test")),
 
     ?assertEqual(ok, nqueue:enq("test", bla)),
+
 
     receive M0 ->
         ?assertEqual({bla, 'some error'}, M0)
@@ -105,7 +110,7 @@ consume_err_err_fun_test_() ->
     
     P1 = global:whereis_name({nqueue_consumer, "test"}),
 
-    ?assertMatch({ok, {"test", bla, {_,_,_}, C, 5000}} when (C >= 1), ?dbget("nq_consumer_cache", P1)),
+    ?assertMatch({ok, {"test", bla, {_,_,_}, C, 5000}} when (C >= 1), ?dbget("nq_consumer_cache", {P1, AppSessionId})),
 
     ?assertEqual(ok, nqueue_consumer:set_state("test", unpaused)),
 
@@ -115,7 +120,7 @@ consume_err_err_fun_test_() ->
 
     ?assertEqual(ok, nqueue_consumer:set_state("test", paused)),
 
-    ?assertMatch({ok, {"test", bla, {_,_,_}, C, 5000}} when (C >= 2), ?dbget("nq_consumer_cache", P1)),
+    ?assertMatch({ok, {"test", bla, {_,_,_}, C, 5000}} when (C >= 2), ?dbget("nq_consumer_cache", {P1, AppSessionId})),
     ?assertEqual({ok, 1}, bdb_store:count("nq_consumer_cache")),
 
     Fe2 = fun(_,M,E, A) -> A ! {M, E}, ok end,
@@ -155,7 +160,7 @@ consume_err_err_fun_test_() ->
 
 receive_many_test_() ->
 
-    {timeout, 60000, [fun() ->
+    {timeout, 60, [fun() ->
 
         ?assertEqual(ok, nqueue_consumer:set_state("test", paused)),
         ?assertEqual(paused, nqueue_consumer:get_state("test")),
@@ -193,7 +198,7 @@ receive_many_test_() ->
 
 process_n_test_() ->
 
-    {timeout, 30000, [ fun() ->
+    {timeout, 30, [ fun() ->
 
     ?assertEqual(0, nqueue:size("test")),
 
@@ -275,7 +280,7 @@ process_n_test_() ->
 
 consumer_proc_fun_test_() ->
 
-    {timeout, 5000, [fun() ->
+    {timeout, 5, [fun() ->
 
     ?assertEqual(paused, nqueue_consumer:get_state("test")),
 
@@ -311,7 +316,7 @@ consumer_proc_fun_test_() ->
 
 consumer_proc_fun_retry_test_() ->
 
-    {timeout, 5000, [fun() ->
+    {timeout, 5, [fun() ->
 
     ?assertEqual(paused, nqueue_consumer:get_state("test")),
 

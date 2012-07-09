@@ -4,7 +4,7 @@
 all: clean app test docs
 	@echo "Done."
 
-./ebin/nq.app: src/*/*.erl include/*.hrl test/*.erl
+./ebin/nq.app: src/*.erl include/*.hrl test/*.erl
 	./rebar compile
 
 deps:
