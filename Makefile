@@ -37,7 +37,7 @@ clean:
 	./rebar clean
 
 run: app
-	erl -pa ./ebin -sname nq@$(shell hostname -s)
+	erl -pa ./ebin -pa ./deps/*/ebin -sname nq@$(shell hostname -s)
 
 test: app
 	mkdir -p .eunit

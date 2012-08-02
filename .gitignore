@@ -2,3 +2,4 @@ deps
 apps
 .eunit
 ebin
+nqdata
